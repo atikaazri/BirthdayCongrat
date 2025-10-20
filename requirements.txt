@@ -1,9 +1,5 @@
 Flask==2.3.3
-FastAPI==0.104.1
-uvicorn==0.24.0
-Twilio==8.10.0
 requests==2.31.0
 qrcode==7.4.2
 Pillow==10.0.0
 python-dotenv==1.0.0
-pydantic==2.4.2
