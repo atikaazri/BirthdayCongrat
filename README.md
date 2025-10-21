@@ -17,17 +17,19 @@ A simple, clean birthday voucher system for cafes and restaurants with WhatsApp 
 
 ```
 BDVoucher/
-├── app.py                # Main Flask application
-├── config.py             # Configuration settings
-├── voucher_system.py     # Voucher management & data handling
-├── whatsapp_service.py   # WhatsApp messaging service
-├── final_testing.py      # Comprehensive testing
-├── requirements.txt      # Python dependencies
+├── prog/                 # Program files
+│   ├── cafe_interface.py    # Cafe interface (public deployment)
+│   ├── admin_interface.py   # Admin interface (local server)
+│   ├── config.py           # Configuration settings
+│   ├── voucher_system.py   # Voucher management & data handling
+│   ├── whatsapp_service.py # WhatsApp messaging service
+│   └── final_testing.py    # Comprehensive testing
 ├── data/                 # Data files (CSV)
 │   ├── employees.csv     # Employee data
 │   └── voucher_history.csv # Voucher history
 ├── docs/                 # Documentation
 │   └── DEPLOYMENT_GUIDE.md
+├── requirements.txt      # Python dependencies
 └── readme.MD            # This file
 ```
 
@@ -89,21 +91,37 @@ DEBUG=True
 
 ### 1. Test the System
 ```bash
+cd prog
 python final_testing.py
 ```
 
-### 2. Start the Application
+### 2. Deploy Cafe Interface (Public)
 ```bash
-python app.py
+cd prog
+python cafe_interface.py
 ```
 Access at: http://localhost:5000
 
-### 3. Web Interface Features
+### 3. Deploy Admin Interface (Local Server)
+```bash
+cd prog
+python admin_interface.py
+```
+Access at: http://localhost:5000
+
+### 4. Interface Features
+
+#### Cafe Interface (Public Deployment)
 - **QR Code Scanner**: Use camera to scan voucher QR codes
 - **Manual Entry**: Enter voucher codes manually
+- **Simple Design**: Clean, staff-friendly interface
+
+#### Admin Interface (Local Server)
+- **All Cafe Features**: QR scanning and manual entry
+- **System Statistics**: Live system status and metrics
+- **Employee Management**: View and manage employee data
+- **Voucher History**: Complete transaction tracking
 - **Birthday Wishes**: Send WhatsApp messages to birthday employees
-- **System Status**: View live statistics
-- **Voucher History**: Track all transactions
 
 ## 📱 WhatsApp Integration
 
@@ -159,6 +177,7 @@ EMP002,Jane Smith,+1234567891,1985-12-03
 
 Run the comprehensive test suite:
 ```bash
+cd prog
 python final_testing.py
 ```
 

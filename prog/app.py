@@ -5,11 +5,13 @@ Main Flask application
 """
 from flask import Flask, render_template_string, request, jsonify
 from config import Config
-from voucher_system import (
+from database import (
     load_employees, get_birthday_today, create_voucher, 
-    redeem_voucher, generate_qr_code, get_all_vouchers
+    redeem_voucher, generate_qr_code, get_all_vouchers,
+    get_voucher_history, get_system_stats, refresh_data
 )
 from whatsapp_service import send_whatsapp_message
+from auto_messaging import start_auto_messaging, stop_auto_messaging, test_auto_messaging
 import csv
 
 # ============= FLASK APPLICATION =============
@@ -40,6 +42,18 @@ HTML_TEMPLATE = """
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background: #f2f2f2; }
+        .nav-links { margin-top: 15px; }
+        .nav-link { 
+            display: inline-block; 
+            margin: 0 10px; 
+            padding: 8px 16px; 
+            background: #007bff; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            font-size: 14px;
+        }
+        .nav-link:hover { background: #0056b3; }
     </style>
 </head>
 <body>
@@ -47,6 +61,10 @@ HTML_TEMPLATE = """
         <div class="header">
             <h1>🎉 {{cafe_name}} - Voucher System</h1>
             <p>📍 {{cafe_location}}</p>
+            <div class="nav-links">
+                <a href="http://localhost:5001" target="_blank" class="nav-link">🏪 Open Cafe Interface</a>
+                <a href="http://localhost:5002" target="_blank" class="nav-link">⚙️ Admin Interface</a>
+            </div>
         </div>
         
         <div class="section">
@@ -64,11 +82,6 @@ HTML_TEMPLATE = """
             <div id="redeemResult" class="result" style="display: none;"></div>
         </div>
         
-        <div class="section">
-            <h3>🎂 Birthday Wishes</h3>
-            <button onclick="sendBirthdayWishes()">Send Birthday Wishes Today</button>
-            <div id="birthdayResult" class="result" style="display: none;"></div>
-        </div>
         
         <div class="section">
             <h3>📊 System Status</h3>
@@ -174,16 +187,6 @@ HTML_TEMPLATE = """
             });
         }
         
-        function sendBirthdayWishes() {
-            fetch('/send-birthday', { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                showResult('birthdayResult', data.message, data.success);
-            })
-            .catch(error => {
-                showResult('birthdayResult', 'Error: ' + error.message, false);
-            });
-        }
         
         function loadStatus() {
             fetch('/status')
@@ -223,7 +226,7 @@ HTML_TEMPLATE = """
             element.style.display = 'block';
         }
         
-        // Load initial status
+        // Load initial data
         loadStatus();
     </script>
 </body>
@@ -257,30 +260,63 @@ def redeem():
             'message': result
         })
 
+
+@app.route('/status')
+def status():
+    """Get system status"""
+    refresh_data()  # Refresh data from CSV before getting stats
+    return jsonify(get_system_stats())
+
+@app.route('/history')
+def history():
+    """Get voucher history"""
+    refresh_data()  # Refresh data from CSV before getting history
+    return jsonify({'history': get_voucher_history()})
+
 @app.route('/send-birthday', methods=['POST'])
 def send_birthday():
-    """Send birthday wishes"""
+    """Send birthday wishes to employees with birthdays today"""
     try:
         birthdays = get_birthday_today()
         
         if not birthdays:
             return jsonify({
-                'success': True,
-                'message': 'No birthdays today!'
+                'success': False,
+                'message': 'No birthdays today'
             })
         
-        sent_count = 0
-        for emp in birthdays:
-            # Create voucher
-            voucher_code = create_voucher(emp['employee_id'], emp['employee_name'])
-            
-            # Send WhatsApp message
-            if send_whatsapp_message(emp['phone_number'], emp['employee_name'], voucher_code):
-                sent_count += 1
+        results = []
+        for employee in birthdays:
+            try:
+                # Create voucher
+                voucher_code = create_voucher(employee['employee_id'], employee['employee_name'])
+                
+                # Generate QR code
+                qr_code = generate_qr_code(voucher_code)
+                
+                # Send WhatsApp message
+                success = send_whatsapp_message(
+                    employee['phone_number'],
+                    employee['employee_name'],
+                    voucher_code
+                )
+                
+                results.append({
+                    'employee_name': employee['employee_name'],
+                    'voucher_code': voucher_code,
+                    'message_sent': success
+                })
+                
+            except Exception as e:
+                results.append({
+                    'employee_name': employee['employee_name'],
+                    'error': str(e)
+                })
         
         return jsonify({
             'success': True,
-            'message': f'Sent birthday wishes to {sent_count} employees!'
+            'message': f'Processed {len(birthdays)} birthdays',
+            'results': results
         })
         
     except Exception as e:
@@ -289,32 +325,20 @@ def send_birthday():
             'message': f'Error: {str(e)}'
         })
 
-@app.route('/status')
-def status():
-    """Get system status"""
-    employees = load_employees()
-    birthdays = get_birthday_today()
-    vouchers = get_all_vouchers()
-    
-    return jsonify({
-        'employees_count': len(employees),
-        'birthdays_count': len(birthdays),
-        'vouchers_count': len(vouchers),
-        'messaging_service': Config.MESSAGING_SERVICE
-    })
-
-@app.route('/history')
-def history():
-    """Get voucher history"""
-    history_data = []
+@app.route('/test-auto-messaging', methods=['POST'])
+def test_auto_messaging_endpoint():
+    """Test automatic messaging system"""
     try:
-        with open(Config.VOUCHER_HISTORY_CSV, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            history_data = list(reader)
-    except FileNotFoundError:
-        pass
-    
-    return jsonify({'history': history_data})
+        test_auto_messaging()
+        return jsonify({
+            'success': True,
+            'message': 'Automatic messaging test completed'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Test failed: {str(e)}'
+        })
 
 # ============= MAIN =============
 if __name__ == '__main__':
@@ -324,11 +348,19 @@ if __name__ == '__main__':
     print("=" * 30)
     
     # Load initial data (quietly)
-    employees = load_employees()
-    birthdays = get_birthday_today()
+    refresh_data()  # Refresh data from CSV
     
-    if birthdays:
-        print(f"Found {len(birthdays)} birthdays today")
+    # Start automatic messaging scheduler
+    if Config.AUTO_MESSAGING_ENABLED:
+        print(f"Starting automatic messaging at {Config.AUTO_MESSAGING_TIME} {Config.AUTO_MESSAGING_TIMEZONE}")
+        start_auto_messaging()
+    else:
+        print("Automatic messaging is disabled")
     
-    # Start the server
-    app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
+    try:
+        # Start the server
+        app.run(host=Config.HOST, port=Config.PORT, debug=Config.DEBUG)
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        stop_auto_messaging()
+        print("System stopped.")

@@ -5,14 +5,17 @@ WhatsApp messaging service for BDVoucher
 import requests
 from config import Config
 
-def send_whatsapp_message(phone, employee_name, voucher_code):
-    """Send WhatsApp message (simplified)"""
+def send_whatsapp_message(phone, employee_name, voucher_code, custom_message=None):
+    """Send WhatsApp message with optional custom message"""
     try:
-        message_text = f"Happy Birthday {employee_name}! 🎉\n\nEnjoy a {Config.VOUCHER_REWARD} at {Config.CAFE_NAME}!\nValue: {Config.VOUCHER_VALUE}\nVoucher Code: {voucher_code}\n\nShow this QR code to redeem your gift!"
+        if custom_message:
+            message_text = custom_message
+        else:
+            message_text = f"Happy Birthday {employee_name}!\n\nEnjoy a {Config.VOUCHER_REWARD} at {Config.CAFE_NAME}!\nValue: {Config.VOUCHER_VALUE}\nVoucher Code: {voucher_code}\n\nShow this QR code to redeem your gift!"
         
         if Config.MESSAGING_SERVICE == 'ultramsg' and Config.ULTRAMSG_INSTANCE_ID and Config.ULTRAMSG_TOKEN:
             # Generate QR code
-            from voucher_system import generate_qr_code
+            from database import generate_qr_code
             qr_image = generate_qr_code(voucher_code)
             
             url = f"https://api.ultramsg.com/{Config.ULTRAMSG_INSTANCE_ID}/messages/image"
