@@ -21,9 +21,9 @@ class Config:
     VOUCHER_EXPIRY_MODE = os.getenv('VOUCHER_EXPIRY_MODE', 'hours').lower()  # 'hours' or 'days'
     
     # Data files (relative to project root)
-    EMPLOYEES_CSV = '../data/employees.csv'
-    VOUCHER_HISTORY_CSV = '../data/voucher_history.csv'
-    QRCODES_DIR = '../data/qrcodes'
+    EMPLOYEES_CSV = 'data/employees.csv'
+    VOUCHER_HISTORY_CSV = 'data/voucher_history.csv'
+    QRCODES_DIR = 'data/qrcodes'
     
     # WhatsApp settings
     MESSAGING_SERVICE = os.getenv('MESSAGING_SERVICE', 'ultramsg').lower()

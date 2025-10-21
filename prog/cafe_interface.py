@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Cafe Interface for BDVoucher - Fixed Camera & Auto-Redemption
-Camera opens properly, automatic validation, full-screen results
+Cafe Interface for BDVoucher - Improved UI with In-Page Camera
+Chill birthday design, mobile compatible, auto-scan on upload
 """
 from flask import Flask, render_template_string, request, jsonify
 from config import Config
@@ -36,351 +36,471 @@ CAFE_HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{cafe_name}} - Voucher Redemption</title>
+    <title>{{ cafe_name }} - Birthday Voucher Redemption</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            margin: 0; 
-            padding: 20px; 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-        }
-        .container { 
-            max-width: 600px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 30px; 
-            border-radius: 15px; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .header h1 {
-            color: #2c3e50;
+        * {
             margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);
+            min-height: 100vh;
+            padding: 10px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 25px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #ff6b9d, #c44569, #f8b500);
+            color: white;
+            padding: 25px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '🎂';
+            position: absolute;
+            top: -10px;
+            left: 20px;
+            font-size: 3em;
+            opacity: 0.3;
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        .header::after {
+            content: '🎈';
+            position: absolute;
+            top: -5px;
+            right: 20px;
             font-size: 2.5em;
+            opacity: 0.3;
+            animation: float 3s ease-in-out infinite reverse;
         }
-        .location {
-            color: #7f8c8d;
-            margin: 5px 0;
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
         }
+        
+        .header h1 {
+            font-size: 2.2em;
+            margin-bottom: 8px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            font-weight: 700;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.95;
+            font-weight: 500;
+        }
+        
         .section {
-            margin: 25px 0;
-            padding: 20px;
-            border: 2px solid #e9ecef;
-            border-radius: 10px;
-            background: #f8f9fa;
+            padding: 25px;
+            border-bottom: 1px solid rgba(255, 182, 193, 0.3);
         }
+        
+        .section:last-child {
+            border-bottom: none;
+        }
+        
+        .section h2 {
+            color: #d63384;
+            margin-bottom: 20px;
+            font-size: 1.6em;
+            font-weight: 600;
+        }
+        
         .section h3 {
-            margin-top: 0;
-            color: #2c3e50;
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 10px;
+            color: #e91e63;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            font-weight: 600;
         }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ffc1cc;
+            border-radius: 15px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.8);
+        }
+        
+        input[type="text"]:focus, input[type="file"]:focus {
+            outline: none;
+            border-color: #ff6b9d;
+            box-shadow: 0 0 0 3px rgba(255, 107, 157, 0.1);
+            background: white;
+        }
+        
         .btn {
-            background: #3498db;
+            background: linear-gradient(135deg, #ff6b9d, #c44569);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
+            padding: 15px 25px;
+            border-radius: 15px;
+            font-size: 16px;
+            font-weight: 600;
             cursor: pointer;
-            font-size: 16px;
+            transition: all 0.3s ease;
             margin: 5px;
-            transition: background 0.3s;
+            box-shadow: 0 4px 15px rgba(255, 107, 157, 0.3);
         }
+        
         .btn:hover {
-            background: #2980b9;
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(255, 107, 157, 0.4);
         }
+        
+        .btn:active {
+            transform: translateY(-1px);
+        }
+        
         .btn-danger {
-            background: #e74c3c;
+            background: linear-gradient(135deg, #ff4757, #ff3838);
+            box-shadow: 0 4px 15px rgba(255, 71, 87, 0.3);
         }
-        .btn-danger:hover {
-            background: #c0392b;
-        }
+        
         .btn-success {
-            background: #27ae60;
+            background: linear-gradient(135deg, #2ed573, #1e90ff);
+            box-shadow: 0 4px 15px rgba(46, 213, 115, 0.3);
         }
-        .btn-success:hover {
-            background: #229954;
+        
+        .btn-info {
+            background: linear-gradient(135deg, #3742fa, #2f3542);
+            box-shadow: 0 4px 15px rgba(55, 66, 250, 0.3);
         }
-        .btn-warning {
-            background: #f39c12;
-        }
-        .btn-warning:hover {
-            background: #e67e22;
-        }
-        .input-group {
-            display: flex;
-            gap: 10px;
-            margin: 15px 0;
-        }
-        .input-group input {
-            flex: 1;
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 6px;
-            font-size: 16px;
-        }
-        .file-input {
-            margin: 15px 0;
-        }
-        .file-input input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            border: 2px dashed #ddd;
-            border-radius: 6px;
-            background: #f8f9fa;
-        }
+        
         .result {
-            margin: 15px 0;
+            margin-top: 20px;
             padding: 15px;
-            border-radius: 6px;
-            font-weight: bold;
+            border-radius: 15px;
+            font-weight: 600;
+            text-align: center;
         }
-        .success {
-            background: #d4edda;
+        
+        .result.success {
+            background: linear-gradient(135deg, #d4edda, #c3e6cb);
             color: #155724;
             border: 1px solid #c3e6cb;
         }
-        .error {
-            background: #f8d7da;
+        
+        .result.error {
+            background: linear-gradient(135deg, #f8d7da, #f5c6cb);
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
-        .info {
-            background: #d1ecf1;
+        
+        .result.info {
+            background: linear-gradient(135deg, #d1ecf1, #bee5eb);
             color: #0c5460;
             border: 1px solid #bee5eb;
         }
-        .warning {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
-        }
-        .scanner-status {
-            text-align: center;
-            color: #007bff;
-            font-weight: bold;
-            margin: 10px 0;
-            padding: 10px;
-            background: #e3f2fd;
-            border-radius: 5px;
-        }
-        .camera-window {
-            text-align: center;
-            margin: 20px 0;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 10px;
-            border: 2px solid #e9ecef;
-        }
-        .camera-window h4 {
-            margin: 0 0 10px 0;
-            color: #2c3e50;
-        }
-        .upload-area {
-            border: 2px dashed #ddd;
-            border-radius: 10px;
+        
+        .camera-container {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border: 2px dashed #ffc1cc;
+            border-radius: 15px;
             padding: 20px;
             text-align: center;
-            background: #f8f9fa;
-            margin: 15px 0;
-        }
-        .upload-area.dragover {
-            border-color: #3498db;
-            background: #e3f2fd;
-        }
-        .countdown {
-            font-size: 18px;
-            font-weight: bold;
-            color: #e74c3c;
+            margin-top: 15px;
+            position: relative;
         }
         
-        /* Full-screen result overlay */
-        .result-overlay {
+        .camera-preview {
+            width: 100%;
+            max-width: 400px;
+            height: 300px;
+            background: #000;
+            border-radius: 10px;
+            margin: 15px auto;
+            display: none;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .camera-preview video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border: 3px solid #ff6b9d;
+            border-radius: 10px;
+            pointer-events: none;
+        }
+        
+        .countdown {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #ff6b9d;
+            margin: 10px 0;
+        }
+        
+        .scanner-status {
+            background: rgba(255, 193, 204, 0.3);
+            padding: 10px;
+            border-radius: 10px;
+            margin-top: 10px;
+            font-family: monospace;
+            color: #495057;
+        }
+        
+        .fullscreen-result {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            display: none;
+            background: rgba(0,0,0,0.8);
+            display: flex;
             justify-content: center;
             align-items: center;
             z-index: 1000;
+            backdrop-filter: blur(5px);
         }
-        .result-modal {
+        
+        .result-card {
             background: white;
             padding: 40px;
-            border-radius: 15px;
+            border-radius: 25px;
             text-align: center;
             max-width: 500px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            margin: 20px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.3);
         }
-        .result-modal h2 {
-            margin: 0 0 20px 0;
+        
+        .result-card h2 {
+            margin-bottom: 20px;
             font-size: 2em;
         }
-        .result-modal .message {
-            font-size: 1.2em;
-            margin: 20px 0;
-            padding: 20px;
-            border-radius: 10px;
+        
+        .result-card.success h2 {
+            color: #2ed573;
         }
-        .result-modal .btn {
-            margin: 10px;
+        
+        .result-card.error h2 {
+            color: #ff4757;
+        }
+        
+        .result-card.info h2 {
+            color: #3742fa;
+        }
+        
+        .result-card p {
+            font-size: 1.2em;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        
+        .back-btn {
+            background: linear-gradient(135deg, #ff6b9d, #c44569);
+            color: white;
+            border: none;
             padding: 15px 30px;
-            font-size: 18px;
+            border-radius: 15px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 107, 157, 0.3);
+        }
+        
+        .back-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255, 107, 157, 0.4);
+        }
+        
+        .upload-area {
+            border: 2px dashed #ffc1cc;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            background: rgba(255, 193, 204, 0.1);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            border-color: #ff6b9d;
+            background: rgba(255, 107, 157, 0.1);
+        }
+        
+        .upload-area.dragover {
+            border-color: #ff6b9d;
+            background: rgba(255, 107, 157, 0.2);
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 5px;
+            }
+            
+            .container {
+                margin: 5px;
+                border-radius: 20px;
+            }
+            
+            .header {
+                padding: 20px;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .section {
+                padding: 20px;
+            }
+            
+            .btn {
+                width: 100%;
+                margin: 5px 0;
+                padding: 18px 25px;
+            }
+            
+            .camera-preview {
+                height: 250px;
+            }
+            
+            .result-card {
+                margin: 10px;
+                padding: 30px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 1.5em;
+            }
+            
+            .section h2 {
+                font-size: 1.4em;
+            }
+            
+            .section h3 {
+                font-size: 1.2em;
+            }
+            
+            .camera-preview {
+                height: 200px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>{{cafe_name}}</h1>
-            <p class="location">📍 {{cafe_location}}</p>
-            <h2>🎫 Voucher Redemption</h2>
+            <h1>🎂 {{ cafe_name }}</h1>
+            <p>📍 {{ cafe_location }}</p>
+        </div>
+        
+        <div class="section">
+            <h2>🎫 Birthday Voucher Redemption</h2>
         </div>
         
         <div class="section">
             <h3>📷 Camera Scanning</h3>
             <div style="text-align: center;">
                 <button class="btn btn-success" onclick="startCameraScan()" id="cameraBtn">📷 Start Camera Scan</button>
-                <button class="btn btn-danger" onclick="stopCameraScan()" id="stopCameraBtn" style="display: none; margin-left: 10px;">🛑 Stop Camera</button>
+                <button class="btn btn-danger" onclick="stopCameraScan()" id="stopCameraBtn" style="display: none;">🛑 Stop Camera</button>
             </div>
-            <div class="camera-window" id="cameraWindow" style="display: none;">
-                <h4>📷 Camera Window</h4>
+            <div class="camera-container" id="cameraContainer" style="display: none;">
+                <h4>📷 Camera Preview</h4>
+                <div class="camera-preview" id="cameraPreview">
+                    <video id="video" autoplay muted playsinline></video>
+                    <div class="camera-overlay" id="cameraOverlay" style="display: none;"></div>
+                </div>
                 <div class="countdown" id="countdown" style="display: none;"></div>
             </div>
             <div class="scanner-status" id="cameraStatus" style="display: none;">
-                🔍 Camera scanning... Check camera window for live feed
+                <div>Status: <span id="statusText">Starting...</span></div>
             </div>
         </div>
         
         <div class="section">
             <h3>📁 Image Upload</h3>
-            <div class="upload-area" id="uploadArea">
-                <p>📁 Drag and drop QR code image here or click to select</p>
-                <input type="file" id="imageInput" accept="image/*" style="display: none;" onchange="handleImageUpload(this)">
-                <button class="btn btn-warning" onclick="document.getElementById('imageInput').click()">📁 Select Image</button>
+            <div class="upload-area" onclick="document.getElementById('imageUpload').click()">
+                <div style="font-size: 3em; margin-bottom: 15px;">📸</div>
+                <div style="font-size: 1.2em; margin-bottom: 10px; color: #495057;">Click to upload QR code image</div>
+                <div style="color: #6c757d; font-size: 0.9em;">or drag and drop your image here</div>
             </div>
-            <div id="imagePreview" style="display: none; text-align: center; margin: 15px 0;">
-                <img id="previewImg" style="max-width: 200px; max-height: 200px; border: 2px solid #ddd; border-radius: 5px;">
-                <br>
-                <button class="btn" onclick="scanUploadedImage()" style="margin-top: 10px;">🔍 Scan This Image</button>
-            </div>
+            <input type="file" id="imageUpload" accept="image/*" style="display: none;" onchange="handleImageUpload()">
         </div>
         
         <div class="section">
             <h3>⌨️ Manual Entry</h3>
-            <div class="input-group">
-                <input type="text" id="voucherCode" placeholder="Enter voucher code manually..." autocomplete="off">
-                <button class="btn" onclick="redeemVoucher()">Redeem Voucher</button>
+            <div class="form-group">
+                <label for="voucherCode">Voucher Code:</label>
+                <input type="text" id="voucherCode" placeholder="Enter 12-character voucher code" maxlength="12">
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-success" onclick="redeemVoucher()">🎫 Redeem Voucher</button>
             </div>
         </div>
         
         <div id="result" class="result" style="display: none;"></div>
     </div>
-
-    <!-- Full-screen result overlay -->
-    <div class="result-overlay" id="resultOverlay">
-        <div class="result-modal">
-            <h2 id="resultTitle">Processing...</h2>
-            <div class="message" id="resultMessage">Please wait...</div>
-            <button class="btn btn-success" onclick="hideResult()" id="backBtn" style="display: none;">Go Back</button>
+    
+    <div id="fullscreenResult" class="fullscreen-result" style="display: none;">
+        <div class="result-card" id="resultCard">
+            <h2 id="resultTitle"></h2>
+            <p id="resultMessage"></p>
+            <button class="back-btn" onclick="hideFullScreenResult()">Back to Scanner</button>
         </div>
     </div>
 
     <script>
         let scanning = false;
-        let uploadedImage = null;
         let countdownTimer = null;
-
-        // Drag and drop functionality
-        const uploadArea = document.getElementById('uploadArea');
-        
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleImageUpload({ files: files });
-            }
-        });
-
-        function handleImageUpload(input) {
-            const file = input.files[0];
-            if (file && file.type.startsWith('image/')) {
-                uploadedImage = file;
-                
-                // Show preview
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    document.getElementById('previewImg').src = e.target.result;
-                    document.getElementById('imagePreview').style.display = 'block';
-                };
-                reader.readAsDataURL(file);
-                
-                showResult('Image uploaded successfully! Click "Scan This Image" to process.', 'info');
-            } else {
-                showResult('Please select a valid image file.', 'error');
-            }
-        }
-
-        function scanUploadedImage() {
-            if (!uploadedImage) {
-                showResult('Please upload an image first.', 'error');
-                return;
-            }
-            
-            showFullScreenResult('Processing...', 'Scanning uploaded image...', 'info');
-            
-            const formData = new FormData();
-            formData.append('image', uploadedImage);
-            
-            fetch('/scan-image', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    // Automatically validate the voucher
-                    validateVoucher(data.code);
-                } else {
-                    showFullScreenResult('Error', 'No QR code found in image: ' + data.message, 'error');
-                    // Auto-clear form after image scan error
-                    setTimeout(() => {
-                        clearForm();
-                    }, 3000);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showFullScreenResult('Error', 'Error scanning image. Please try again.', 'error');
-                // Auto-clear form after network error
-                setTimeout(() => {
-                    clearForm();
-                }, 3000);
-            });
-        }
+        let videoStream = null;
 
         function startCameraScan() {
             if (scanning) return;
             
-            showFullScreenResult('Starting Camera...', 'Opening camera window...', 'info');
+            scanning = true;
+            document.getElementById('cameraBtn').style.display = 'none';
+            document.getElementById('stopCameraBtn').style.display = 'inline-block';
+            document.getElementById('cameraContainer').style.display = 'block';
+            document.getElementById('cameraStatus').style.display = 'block';
+            document.getElementById('cameraPreview').style.display = 'block';
             
+            // Start in-page camera
+            startInPageCamera();
+            
+            // Start backend camera scan
             fetch('/start-camera-scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
@@ -388,66 +508,52 @@ CAFE_HTML_TEMPLATE = """
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    scanning = true;
-                    document.getElementById('cameraBtn').style.display = 'none';
-                    document.getElementById('stopCameraBtn').style.display = 'inline-block';
-                    document.getElementById('cameraWindow').style.display = 'block';
-                    document.getElementById('cameraStatus').style.display = 'block';
-                    document.getElementById('countdown').style.display = 'block';
-                    hideResult();
-                    showResult('Camera scan started! OpenCV window opened. Point camera at QR code.', 'info');
-                    
-                    // Start countdown
-                    startCountdown(30);
-                    
-                    // Start polling for results
+                    startCountdown();
                     pollCameraScan();
                 } else {
-                    showFullScreenResult('Error', 'Failed to start camera scan: ' + data.message, 'error');
+                    showResult('Failed to start camera scan: ' + data.message, 'error');
+                    stopCameraScan();
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                showFullScreenResult('Error', 'Error starting camera scan. Please try again.', 'error');
+                showResult('Error starting camera scan: ' + error, 'error');
+                stopCameraScan();
             });
         }
 
-        function startCountdown(seconds) {
-            let timeLeft = seconds;
-            const countdownElement = document.getElementById('countdown');
-            
-            countdownTimer = setInterval(() => {
-                // Check if scanning is still active
-                if (!scanning) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    return;
-                }
-                
-                countdownElement.textContent = `Auto-close in: ${timeLeft} seconds`;
-                timeLeft--;
-                
-                if (timeLeft < 0) {
-                    clearInterval(countdownTimer);
-                    countdownTimer = null;
-                    stopCameraScan();
-                }
-            }, 1000);
+        function startInPageCamera() {
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    videoStream = stream;
+                    const video = document.getElementById('video');
+                    video.srcObject = stream;
+                    document.getElementById('cameraOverlay').style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error accessing camera:', error);
+                    showResult('Camera access denied. Please allow camera permission.', 'error');
+                });
         }
-
 
         function stopCameraScan() {
             if (!scanning) return;
             
-            // Clear countdown timer immediately
+            scanning = false;
+            
+            // Stop in-page camera
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+            
+            // Clear countdown timer
             if (countdownTimer) {
                 clearInterval(countdownTimer);
                 countdownTimer = null;
             }
             
-            // Stop scanning immediately
-            scanning = false;
-            
+            // Stop backend camera
             fetch('/stop-camera-scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
@@ -456,11 +562,11 @@ CAFE_HTML_TEMPLATE = """
             .then(data => {
                 document.getElementById('cameraBtn').style.display = 'inline-block';
                 document.getElementById('stopCameraBtn').style.display = 'none';
-                document.getElementById('cameraWindow').style.display = 'none';
+                document.getElementById('cameraContainer').style.display = 'none';
                 document.getElementById('cameraStatus').style.display = 'none';
-                document.getElementById('countdown').style.display = 'none';
+                document.getElementById('cameraPreview').style.display = 'none';
+                document.getElementById('cameraOverlay').style.display = 'none';
                 showResult('Camera scan stopped.', 'info');
-                // Clear form when camera scan stops
                 setTimeout(() => {
                     clearForm();
                 }, 1000);
@@ -470,19 +576,34 @@ CAFE_HTML_TEMPLATE = """
             });
         }
 
+        function startCountdown() {
+            let timeLeft = 30;
+            const countdownElement = document.getElementById('countdown');
+            countdownElement.style.display = 'block';
+            
+            countdownTimer = setInterval(() => {
+                if (!scanning) {
+                    clearInterval(countdownTimer);
+                    return;
+                }
+                
+                countdownElement.textContent = `Auto-close in ${timeLeft} seconds`;
+                timeLeft--;
+                
+                if (timeLeft < 0) {
+                    clearInterval(countdownTimer);
+                    stopCameraScan();
+                }
+            }, 1000);
+        }
+
         function pollCameraScan() {
-            if (!scanning) {
-                console.log('Polling stopped - scanning is false');
-                return;
-            }
+            if (!scanning) return;
             
             fetch('/check-camera-scan')
             .then(res => res.json())
             .then(data => {
-                console.log('Camera scan check result:', data);
-                
                 if (data.detected) {
-                    // QR code detected - automatically validate
                     console.log('QR code detected:', data.result);
                     stopCameraScan();
                     validateVoucher(data.result);
@@ -491,20 +612,16 @@ CAFE_HTML_TEMPLATE = """
                     showFullScreenResult('Error', 'Camera scan error: ' + data.error, 'error');
                     stopCameraScan();
                 } else if (data.active) {
-                    // Continue polling
                     setTimeout(pollCameraScan, 1000);
                 } else {
-                    // Scanner is not active, stop polling and revert interface
                     console.log('Scanner not active, stopping polling');
                     scanning = false;
-                    // Revert interface to original state
                     document.getElementById('cameraBtn').style.display = 'inline-block';
                     document.getElementById('stopCameraBtn').style.display = 'none';
-                    document.getElementById('cameraWindow').style.display = 'none';
+                    document.getElementById('cameraContainer').style.display = 'none';
                     document.getElementById('cameraStatus').style.display = 'none';
-                    document.getElementById('countdown').style.display = 'none';
+                    document.getElementById('cameraPreview').style.display = 'none';
                     showResult('Camera scan completed.', 'info');
-                    // Clear form after timeout
                     setTimeout(() => {
                         clearForm();
                     }, 2000);
@@ -518,9 +635,65 @@ CAFE_HTML_TEMPLATE = """
             });
         }
 
-        function validateVoucher(code) {
-            showFullScreenResult('Validating...', 'Processing voucher...', 'info');
+        function handleImageUpload() {
+            const fileInput = document.getElementById('imageUpload');
+            const file = fileInput.files[0];
             
+            if (!file) return;
+            
+            if (!file.type.startsWith('image/')) {
+                showResult('Please select a valid image file.', 'error');
+                return;
+            }
+            
+            // Auto-scan the uploaded image
+            scanUploadedImage();
+        }
+
+        function scanUploadedImage() {
+            const fileInput = document.getElementById('imageUpload');
+            const file = fileInput.files[0];
+            
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('image', file);
+            
+            fetch('/scan-image', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.code) {
+                    validateVoucher(data.code);
+                } else {
+                    showResult('No QR code found in image.', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showResult('Error scanning image: ' + error, 'error');
+            });
+        }
+
+        function redeemVoucher() {
+            const code = document.getElementById('voucherCode').value.trim();
+            
+            if (!code) {
+                showResult('Please enter a voucher code.', 'error');
+                return;
+            }
+            
+            if (code.length !== 12) {
+                showResult('Voucher code must be 12 characters long.', 'error');
+                return;
+            }
+            
+            validateVoucher(code);
+        }
+
+        function validateVoucher(code) {
             fetch('/redeem', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -529,81 +702,75 @@ CAFE_HTML_TEMPLATE = """
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    showFullScreenResult('Success!', `Voucher redeemed successfully for: ${data.employee_name}`, 'success');
-                } else {
-                    showFullScreenResult('Error', data.message, 'error');
-                    // Auto-clear form after error too (for expired/already redeemed cases)
+                    showFullScreenResult('Success!', `Voucher redeemed successfully for ${data.employee_name}!`, 'success');
                     setTimeout(() => {
                         clearForm();
-                    }, 3000); // Clear after 3 seconds for errors
+                    }, 2000);
+                } else {
+                    showFullScreenResult('Error', data.message, 'error');
+                    setTimeout(() => {
+                        clearForm();
+                    }, 3000);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                showFullScreenResult('Error', 'Error validating voucher. Please try again.', 'error');
-                // Auto-clear form after network errors
+                showFullScreenResult('Error', 'Network error: ' + error, 'error');
                 setTimeout(() => {
                     clearForm();
                 }, 3000);
             });
         }
 
-        function redeemVoucher() {
-            const code = document.getElementById('voucherCode').value.trim();
-            if (!code) {
-                showResult('Please enter a voucher code', 'error');
-                return;
-            }
+        function showResult(message, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = 'result ' + type;
+            resultDiv.style.display = 'block';
             
-            validateVoucher(code);
-        }
-
-        function clearForm() {
-            // Clear manual entry field
-            document.getElementById('voucherCode').value = '';
-            
-            // Clear uploaded image
-            uploadedImage = null;
-            document.getElementById('imageInput').value = '';
-            document.getElementById('imagePreview').style.display = 'none';
-            document.getElementById('previewImg').src = '';
-            
-            // Clear any result messages
-            document.getElementById('result').style.display = 'none';
+            setTimeout(() => {
+                resultDiv.style.display = 'none';
+            }, 5000);
         }
 
         function showFullScreenResult(title, message, type) {
             document.getElementById('resultTitle').textContent = title;
             document.getElementById('resultMessage').textContent = message;
-            document.getElementById('resultMessage').className = 'message ' + type;
-            document.getElementById('resultOverlay').style.display = 'flex';
-            document.getElementById('backBtn').style.display = 'inline-block';
+            document.getElementById('resultCard').className = 'result-card ' + type;
+            document.getElementById('fullscreenResult').style.display = 'flex';
+        }
+
+        function hideFullScreenResult() {
+            document.getElementById('fullscreenResult').style.display = 'none';
+        }
+
+        function clearForm() {
+            document.getElementById('voucherCode').value = '';
+            document.getElementById('imageUpload').value = '';
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('fullscreenResult').style.display = 'none';
+        }
+
+        // Drag and drop functionality
+        const uploadArea = document.querySelector('.upload-area');
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
             
-            // Auto-clear form after showing result (except for errors that might need retry)
-            if (type === 'success') {
-                setTimeout(() => {
-                    clearForm();
-                }, 2000); // Clear after 2 seconds for success
-            }
-        }
-
-        function hideResult() {
-            document.getElementById('resultOverlay').style.display = 'none';
-            // Clear form when hiding result
-            clearForm();
-        }
-
-        function showResult(message, type) {
-            const element = document.getElementById('result');
-            element.textContent = message;
-            element.className = 'result ' + type;
-            element.style.display = 'block';
-        }
-
-        // Allow Enter key to redeem voucher
-        document.getElementById('voucherCode').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                redeemVoucher();
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                document.getElementById('imageUpload').files = files;
+                handleImageUpload();
             }
         });
     </script>
@@ -617,7 +784,6 @@ def index():
     return render_template_string(CAFE_HTML_TEMPLATE, 
                                 cafe_name=Config.CAFE_NAME, 
                                 cafe_location=Config.CAFE_LOCATION)
-
 
 @app.route('/start-camera-scan', methods=['POST'])
 def start_camera_scan():
@@ -647,7 +813,6 @@ def stop_camera_scan():
     """Stop the camera scan"""
     global camera, scanner_active, scanner_result, scanner_error
     
-    print("[DEBUG] Stopping camera scan...")
     scanner_active = False
     scanner_result = None
     scanner_error = None
@@ -692,35 +857,34 @@ def scan_image():
             return jsonify({'success': False, 'message': 'No image file provided'})
         
         file = request.files['image']
+        
         if file.filename == '':
             return jsonify({'success': False, 'message': 'No image file selected'})
         
-        if file and allowed_file(file.filename):
-            # Read the image
-            image_data = file.read()
-            
-            # Convert to OpenCV format
-            nparr = np.frombuffer(image_data, np.uint8)
-            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
-            if image is None:
-                return jsonify({'success': False, 'message': 'Could not read image'})
-            
-            # Scan for QR codes
-            decoded_objects = decode(image)
-            if decoded_objects:
-                for obj in decoded_objects:
-                    qr_data = obj.data.decode("utf-8")
-                    # Check if it's a valid voucher code
-                    if qr_data.startswith('BDV') or (len(qr_data) >= 8 and qr_data.isalnum()):
-                        return jsonify({'success': True, 'code': qr_data})
-                
-                # If we found QR codes but none were valid vouchers
-                return jsonify({'success': False, 'message': 'QR code found but not a valid voucher'})
-            else:
-                return jsonify({'success': False, 'message': 'No QR code found in image'})
-        else:
+        if not allowed_file(file.filename):
             return jsonify({'success': False, 'message': 'Invalid file type'})
+        
+        # Read image data
+        image_data = file.read()
+        nparr = np.frombuffer(image_data, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            return jsonify({'success': False, 'message': 'Could not decode image'})
+        
+        # Decode QR codes
+        decoded_objects = decode(image)
+        
+        if decoded_objects:
+            qr_data = decoded_objects[0].data.decode("utf-8")
+            
+            # Check if it's a valid voucher code (12 characters, alphanumeric)
+            if len(qr_data) == 12 and qr_data.isalnum():
+                return jsonify({'success': True, 'code': qr_data})
+            else:
+                return jsonify({'success': False, 'message': 'Invalid voucher code format'})
+        else:
+            return jsonify({'success': False, 'message': 'No QR code found'})
     
     except Exception as e:
         return jsonify({'success': False, 'message': f'Error scanning image: {str(e)}'})
@@ -803,7 +967,7 @@ def camera_scan_thread():
 
 @app.route('/redeem', methods=['POST'])
 def redeem():
-    """Redeem a voucher - FIXED to work properly"""
+    """Redeem a voucher"""
     data = request.json
     code = data.get('code', '')
     
@@ -822,7 +986,7 @@ def redeem():
         })
 
 if __name__ == '__main__':
-    print(f"Starting {Config.CAFE_NAME} Cafe Interface (Fixed Camera & Auto-Redemption)...")
+    print(f"Starting {Config.CAFE_NAME} Cafe Interface (Improved UI & In-Page Camera)...")
     print(f"Cafe Interface: http://localhost:{Config.CAFE_PORT}")
     print("Press Ctrl+C to stop")
     print("=" * 30)
