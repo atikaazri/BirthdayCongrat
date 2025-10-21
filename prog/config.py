@@ -20,10 +20,11 @@ class Config:
     VOUCHER_VALIDITY_DAYS = int(os.getenv('VOUCHER_VALIDITY_DAYS', 1))  # Alternative to hours
     VOUCHER_EXPIRY_MODE = os.getenv('VOUCHER_EXPIRY_MODE', 'hours').lower()  # 'hours' or 'days'
     
-    # Data files (relative to project root)
-    EMPLOYEES_CSV = 'data/employees.csv'
-    VOUCHER_HISTORY_CSV = 'data/voucher_history.csv'
-    QRCODES_DIR = 'data/qrcodes'
+    # Data files (absolute paths to ensure they work from any directory)
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    EMPLOYEES_CSV = os.path.join(PROJECT_ROOT, 'data', 'employees.csv')
+    VOUCHER_HISTORY_CSV = os.path.join(PROJECT_ROOT, 'data', 'voucher_history.csv')
+    QRCODES_DIR = os.path.join(PROJECT_ROOT, 'data', 'qrcodes')
     
     # WhatsApp settings
     MESSAGING_SERVICE = os.getenv('MESSAGING_SERVICE', 'ultramsg').lower()

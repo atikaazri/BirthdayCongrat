@@ -131,6 +131,7 @@ dmypy.json
 # Project specific
 *.log
 *.csv
+data/
 .env
 .env.local
 .env.production
