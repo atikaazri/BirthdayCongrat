@@ -18,19 +18,24 @@ A simple, clean birthday voucher system for cafes and restaurants with WhatsApp 
 ```
 BDVoucher/
 ├── prog/                 # Program files
-│   ├── cafe_interface.py    # Cafe interface (public deployment)
-│   ├── admin_interface.py   # Admin interface (local server)
-│   ├── config.py           # Configuration settings
-│   ├── voucher_system.py   # Voucher management & data handling
+│   ├── app.py              # Main Flask application
+│   ├── cafe_interface.py   # Cafe interface (public deployment)
+│   ├── admin_interface.py  # Admin interface (local server)
+│   ├── config.py          # Configuration settings with absolute paths
+│   ├── database.py        # Centralized database operations
+│   ├── qr_system.py       # QR code generation and scanning
 │   ├── whatsapp_service.py # WhatsApp messaging service
-│   └── final_testing.py    # Comprehensive testing
+│   ├── auto_messaging.py  # Automatic birthday messaging
+│   └── final_testing.py   # Comprehensive testing
 ├── data/                 # Data files (CSV)
 │   ├── employees.csv     # Employee data
-│   └── voucher_history.csv # Voucher history
+│   ├── voucher_history.csv # Voucher history
+│   └── qrcodes/          # Generated QR code images
 ├── docs/                 # Documentation
-│   └── DEPLOYMENT_GUIDE.md
+│   ├── DEPLOYMENT_GUIDE.md
+│   └── TECHNICAL_DOCUMENTATION.md
 ├── requirements.txt      # Python dependencies
-└── readme.MD            # This file
+└── README.md            # This file
 ```
 
 ## 🚀 Quick Start
@@ -95,21 +100,28 @@ cd prog
 python final_testing.py
 ```
 
-### 2. Deploy Cafe Interface (Public)
+### 2. Deploy Main Application
+```bash
+cd prog
+python app.py
+```
+Access at: http://localhost:5000
+
+### 3. Deploy Cafe Interface (Public)
 ```bash
 cd prog
 python cafe_interface.py
 ```
-Access at: http://localhost:5000
+Access at: http://localhost:5001
 
-### 3. Deploy Admin Interface (Local Server)
+### 4. Deploy Admin Interface (Local Server)
 ```bash
 cd prog
 python admin_interface.py
 ```
-Access at: http://localhost:5000
+Access at: http://localhost:5002
 
-### 4. Interface Features
+### 5. Interface Features
 
 #### Cafe Interface (Public Deployment)
 - **QR Code Scanner**: Use camera to scan voucher QR codes
@@ -198,17 +210,19 @@ EMP001,John Doe,+1234567890,1990-01-15
 ```
 
 ### Voucher Data
-- **Secure Codes**: BDV + 8 random characters (e.g., BDV3K9M2X7)
-- **QR Code Data**: Base64 encoded QR images
-- **Expiration**: Configurable validity period
+- **Secure Codes**: 12-character UUID-based codes (e.g., A1B2C3D4E5F6)
+- **QR Code Images**: PNG files stored in data/qrcodes/
+- **Expiration**: Configurable validity period (default 24 hours)
 - **Status**: Created, redeemed, expired
 
 ## 🔒 Security Features
 
-- **Cryptographically Secure Codes**: Using Python's `secrets` module
-- **Input Validation**: All user inputs are validated
-- **Environment Protection**: Sensitive data in environment variables
+- **Cryptographically Secure Codes**: Using Python's `uuid` module for unique voucher generation
+- **Absolute Path Configuration**: Prevents path resolution issues across different deployment environments
+- **Input Validation**: All user inputs are validated and sanitized
+- **Environment Protection**: Sensitive data stored in environment variables
 - **Error Handling**: Comprehensive error logging and handling
+- **File-based Storage**: Secure CSV-based data storage with proper file permissions
 
 ## 🚀 Deployment
 

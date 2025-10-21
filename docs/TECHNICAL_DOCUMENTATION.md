@@ -30,16 +30,34 @@ BDVoucher is a birthday voucher management system designed for cafes and restaur
    - Port: 5002 (configurable)
 
 4. **Database Layer (`database.py`)**
-   - Centralized data operations
-   - CSV file management
+   - Centralized data operations with VoucherDatabase class
+   - CSV file management with absolute path resolution
    - Voucher lifecycle management
-   - Employee data handling
+   - Employee data handling and caching
+   - Real-time data refresh capabilities
 
 5. **Configuration (`config.py`)**
    - Environment-based configuration
+   - Absolute path resolution for data files
    - WhatsApp API settings
    - Server port configuration
    - Voucher validity settings
+
+6. **QR System (`qr_system.py`)**
+   - QR code generation using qrcode library
+   - Camera-based QR code scanning with OpenCV
+   - Image file processing and validation
+   - Integration with voucher validation system
+
+7. **WhatsApp Service (`whatsapp_service.py`)**
+   - UltraMsg API integration
+   - Message templating and formatting
+   - Image attachment support for QR codes
+
+8. **Auto Messaging (`auto_messaging.py`)**
+   - Scheduled birthday message sending
+   - Timezone-aware scheduling
+   - Automatic voucher creation and distribution
 
 ## 🔄 Data Flow
 
@@ -72,10 +90,19 @@ timestamp,voucher_code,employee_id,employee_name,status
 2025-10-21T11:00:00,ABC123DEF456,EMP001,John Doe,redeemed
 ```
 
+### Path Resolution
+The system uses absolute paths to ensure data files are found regardless of the working directory:
+```python
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EMPLOYEES_CSV = os.path.join(PROJECT_ROOT, 'data', 'employees.csv')
+VOUCHER_HISTORY_CSV = os.path.join(PROJECT_ROOT, 'data', 'voucher_history.csv')
+QRCODES_DIR = os.path.join(PROJECT_ROOT, 'data', 'qrcodes')
+```
+
 ## 🔐 Security Features
 
 ### Voucher Code Generation
-- **Algorithm**: UUID4-based generation
+- **Algorithm**: UUID4-based generation with string manipulation
 - **Format**: 12-character alphanumeric codes
 - **Uniqueness**: Guaranteed by UUID4
 - **Example**: `A1B2C3D4E5F6`
@@ -85,6 +112,7 @@ timestamp,voucher_code,employee_id,employee_name,status
 - Employee ID validation
 - Date format validation
 - File type validation for image uploads
+- Absolute path validation for data files
 
 ## 📱 WhatsApp Integration
 
@@ -167,9 +195,11 @@ ADMIN_PORT=5002
 
 ### Admin Interface (`admin_interface.py`)
 - `GET /`: Admin dashboard
-- `GET /api/vouchers`: Get all vouchers
-- `GET /api/history`: Get voucher history
-- `GET /api/stats`: Get system statistics
+- `GET /status`: Get system statistics
+- `GET /employees`: Get employee list
+- `GET /vouchers`: Get all vouchers
+- `GET /history`: Get voucher history
+- `POST /clear-history`: Clear voucher history
 
 ## 🧪 Testing
 

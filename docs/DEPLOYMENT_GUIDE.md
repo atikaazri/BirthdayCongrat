@@ -40,15 +40,22 @@ pip install -r requirements.txt
 python test_simple.py
 ```
 
-### 2. Start Development Server
+### 2. Start Development Servers
 
 ```bash
-# Start the application
+# Start main application
+cd prog
 python app.py
+
+# In separate terminals, start interfaces:
+python cafe_interface.py
+python admin_interface.py
 ```
 
 ### 3. Access Services
-- **Web Interface**: http://localhost:5000
+- **Main Interface**: http://localhost:5000
+- **Cafe Interface**: http://localhost:5001
+- **Admin Interface**: http://localhost:5002
 - **QR Code Scanner**: Built-in camera scanning
 - **System Status**: Live statistics and history
 
@@ -121,14 +128,14 @@ touch data/voucher_history.csv
 Create `/etc/systemd/system/bdvoucher.service`:
 ```ini
 [Unit]
-Description=BDVoucher Application
+Description=BDVoucher Main Application
 After=network.target
 
 [Service]
 Type=exec
 User=bdvoucher
 Group=bdvoucher
-WorkingDirectory=/home/bdvoucher/BDVoucher
+WorkingDirectory=/home/bdvoucher/BDVoucher/prog
 Environment=PATH=/home/bdvoucher/BDVoucher/venv/bin
 ExecStart=/home/bdvoucher/BDVoucher/venv/bin/python app.py
 Restart=always
@@ -138,12 +145,54 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-#### Start Service
+#### Cafe Interface Service
+Create `/etc/systemd/system/bdvoucher-cafe.service`:
+```ini
+[Unit]
+Description=BDVoucher Cafe Interface
+After=network.target
+
+[Service]
+Type=exec
+User=bdvoucher
+Group=bdvoucher
+WorkingDirectory=/home/bdvoucher/BDVoucher/prog
+Environment=PATH=/home/bdvoucher/BDVoucher/venv/bin
+ExecStart=/home/bdvoucher/BDVoucher/venv/bin/python cafe_interface.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### Admin Interface Service
+Create `/etc/systemd/system/bdvoucher-admin.service`:
+```ini
+[Unit]
+Description=BDVoucher Admin Interface
+After=network.target
+
+[Service]
+Type=exec
+User=bdvoucher
+Group=bdvoucher
+WorkingDirectory=/home/bdvoucher/BDVoucher/prog
+Environment=PATH=/home/bdvoucher/BDVoucher/venv/bin
+ExecStart=/home/bdvoucher/BDVoucher/venv/bin/python admin_interface.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+#### Start Services
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable bdvoucher
-sudo systemctl start bdvoucher
-sudo systemctl status bdvoucher
+sudo systemctl enable bdvoucher bdvoucher-cafe bdvoucher-admin
+sudo systemctl start bdvoucher bdvoucher-cafe bdvoucher-admin
+sudo systemctl status bdvoucher bdvoucher-cafe bdvoucher-admin
 ```
 
 ### 5. Nginx Configuration
@@ -166,6 +215,29 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+    }
+
+    # Cafe interface
+    location /cafe/ {
+        proxy_pass http://localhost:5001/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Enable WebSocket support for camera access
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # Admin interface
+    location /admin/ {
+        proxy_pass http://localhost:5002/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     # Static files (if any)
@@ -223,11 +295,11 @@ COPY . .
 RUN useradd -m -u 1000 bdvoucher && chown -R bdvoucher:bdvoucher /app
 USER bdvoucher
 
-# Expose port
-EXPOSE 5000
+# Expose ports
+EXPOSE 5000 5001 5002
 
-# Start application
-CMD ["python", "app.py"]
+# Start application (main interface)
+CMD ["python", "prog/app.py"]
 ```
 
 ### 2. Docker Compose
@@ -236,7 +308,7 @@ Create `docker-compose.yml`:
 version: '3.8'
 
 services:
-  app:
+  main:
     build: .
     environment:
       CAFE_NAME: "Your Cafe Name"
@@ -254,6 +326,41 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env
+    command: ["python", "prog/app.py"]
+
+  cafe:
+    build: .
+    environment:
+      CAFE_NAME: "Your Cafe Name"
+      CAFE_LOCATION: "Your Location"
+      VOUCHER_REWARD: "FREE Drink"
+      VOUCHER_VALUE: "$15"
+      VOUCHER_VALIDITY_HOURS: 24
+      CAFE_PORT: 5001
+      DEBUG: False
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    command: ["python", "prog/cafe_interface.py"]
+
+  admin:
+    build: .
+    environment:
+      CAFE_NAME: "Your Cafe Name"
+      CAFE_LOCATION: "Your Location"
+      VOUCHER_REWARD: "FREE Drink"
+      VOUCHER_VALUE: "$15"
+      VOUCHER_VALIDITY_HOURS: 24
+      ADMIN_PORT: 5002
+      DEBUG: False
+    ports:
+      - "5002:5002"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env
+    command: ["python", "prog/admin_interface.py"]
 ```
 
 ### 3. Deploy with Docker
