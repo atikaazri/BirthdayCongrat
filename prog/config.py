@@ -30,6 +30,7 @@ class Config:
     MESSAGING_SERVICE = os.getenv('MESSAGING_SERVICE', 'ultramsg').lower()
     ULTRAMSG_INSTANCE_ID = os.getenv('ULTRAMSG_INSTANCE_ID', '')
     ULTRAMSG_TOKEN = os.getenv('ULTRAMSG_TOKEN', '')
+    TEXTMEBOT_KEY = os.getenv('TEXTMEBOT_KEY', '')
     
     # Automatic messaging settings
     AUTO_MESSAGING_ENABLED = os.getenv('AUTO_MESSAGING_ENABLED', 'True').lower() == 'true'
