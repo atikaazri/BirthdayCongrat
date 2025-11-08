@@ -1,8 +1,10 @@
 import os
-import uuid
-import cv2
-import qrcode
-from pyzbar.pyzbar import decode
+# uuid
+#import cv2
+#import qrcode
+#rom pyzbar.pyzbar import decode
+from datetime import datetime, timedelta
+from secure_qr import SecureQR
 
 # ============================================================
 # CONFIGURATION
@@ -23,7 +25,43 @@ def generate_voucher_code():
     return str(uuid.uuid4()).replace("-", "").upper()[:12]
 
 def create_qr_code(voucher_code):
+    """
+    Return a BASE64 data URL for the QR image, same as before,
+    but now the QR encodes a signed V2 payload wrapping voucher_code.
+    """
+    sec = SecureQR()  # uses VOUCHER_SECRET_KEY if set
+    now = datetime.now()
+    expires_at = now + timedelta(hours=Config.get_voucher_validity_hours())
+
+    # Minimal secure payload that matches the V2 format
+    payload = {
+        "code": voucher_code,
+        "created_at": now.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "version": SecureQR.VERSION
+    }
+
+    # SecureQR wants a single string to embed; we’ll reuse its signing method
+    # by temporarily calling a tiny helper on the instance:
+    import json, base64
+    encoded_data = base64.b64encode(json.dumps(payload, sort_keys=True).encode()).decode()
+    signature = sec._generate_signature(encoded_data)  # same HMAC the class uses
+    secure_code = f"{SecureQR.VERSION}|{encoded_data}|{signature}"
+
+    data_url = sec.create_qr_image(secure_code)  # "data:image/png;base64,..."
+
+    png_b64 = data_url.split(",", 1)[1]
+    png_bytes = base64.b64decode(png_b64)
+    file_path = os.path.join(SAVE_DIR, f"{voucher_code}.png")
+    with open(file_path, "wb") as f:
+        f.write(png_bytes)
+    # print(f"[+] QR saved: {file_path}")  # optional log
+
+    return data_url
+
+
     """Create a QR code for a voucher and save it to file."""
+    '''
     qr = qrcode.QRCode(
         version=1, box_size=10, border=4,
         error_correction=qrcode.constants.ERROR_CORRECT_L
@@ -36,6 +74,23 @@ def create_qr_code(voucher_code):
     img.save(file_path)
     print(f"[+] QR saved: {file_path}")
     return file_path
+'''
+
+# Optional helper to check and parse incoming QR strings (V1 or V2)
+def parse_qr_text(qr_text: str) -> str:
+    """
+    Accept either legacy code (V1) or V2 secure string.
+    Returns the underlying voucher_code to redeem.
+    """
+    if qr_text.startswith('V2|'):
+        # validate and extract
+        from secure_qr import secure_qr
+        ok, data, msg = secure_qr.validate_secure_code(qr_text)
+        if not ok:
+            raise ValueError(f"Invalid secure code: {msg}")
+        return data["code"]
+    return qr_text  # legacy
+
 
 def generate_and_save_vouchers(n=NUM_VOUCHERS):
     vouchers = []

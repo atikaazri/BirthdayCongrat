@@ -12,6 +12,7 @@ import base64
 import qrcode
 from io import BytesIO
 from config import Config
+from secure_qr import secure_qr  # V2 QR signer
 
 class VoucherDatabase:
     """Centralized database interface for voucher operations"""
@@ -258,9 +259,12 @@ class VoucherDatabase:
             print(f"[HISTORY] Saved {status} for voucher {voucher_code}")
         except Exception as e:
             print(f"Error saving to history: {e}")
-    
+
+
+   
+    '''
     def generate_qr_code(self, voucher_code):
-        """Generate QR code for voucher and save to file"""
+        Generate QR code for voucher and save to fil
         # Import QR system functions
         from qr_system import create_qr_code
         
@@ -274,6 +278,17 @@ class VoucherDatabase:
         img_base64 = base64.b64encode(buffered.getvalue()).decode()
         
         return f"data:image/png;base64,{img_base64}"
+    '''
+    
+    def generate_qr_code(self, voucher_code):
+        """Generate QR code for voucher and return a base64 data URL"""
+        from qr_system import create_qr_code
+        # single source of truth (now secure V2 payload)
+        return create_qr_code(voucher_code)
+
+    
+  
+
     
     def clear_voucher_history(self):
         """Clear voucher history (for testing)"""
@@ -391,6 +406,7 @@ def check_voucher_status(voucher_code):
     return db.check_voucher_status(voucher_code)
 
 def get_voucher_info(voucher_code):
+
     return db.get_voucher_info(voucher_code)
 
 def cleanup_expired_vouchers():
