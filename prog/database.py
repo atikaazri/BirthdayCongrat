@@ -12,6 +12,7 @@ import base64
 import qrcode
 from io import BytesIO
 from config import Config
+from secure_qr import secure_qr  # V2 QR signer
 
 class VoucherDatabase:
     """Centralized database interface for voucher operations"""
@@ -110,16 +111,40 @@ class VoucherDatabase:
         import uuid
         return str(uuid.uuid4()).replace("-", "").upper()[:12]
     
-    def create_voucher(self, employee_id, employee_name):
-        """Create a voucher with secure code"""
+    def create_voucher(self, employee_id, employee_name, force_new=False):
+        """
+        Create a voucher with secure code
+        
+        Args:
+            employee_id: Employee ID
+            employee_name: Employee name
+            force_new: If True, create a new voucher even if employee has an active one (for testing)
+        
+        Returns:
+            Voucher code
+        """
         # Reload vouchers to ensure we have latest data
         self.load_vouchers_from_csv()
         
-        # Check if employee already has an active voucher
-        for code, voucher in self.vouchers_db.items():
-            if voucher['employee_id'] == employee_id and not voucher['redeemed']:
-                # Employee already has an active voucher, return existing code
-                return code
+        # Check if employee already has an active (non-expired, non-redeemed) voucher
+        if not force_new:
+            for code, voucher in self.vouchers_db.items():
+                if voucher['employee_id'] == employee_id and not voucher['redeemed']:
+                    # Check if the voucher is expired
+                    try:
+                        expires_at = datetime.fromisoformat(voucher['expires_at'])
+                        if datetime.now() <= expires_at:
+                            # Employee already has an active, non-expired voucher
+                            print(f"[INFO] Employee {employee_id} already has active voucher {code}")
+                            return code
+                        else:
+                            # Voucher is expired, mark it as such and create a new one
+                            print(f"[INFO] Employee {employee_id} has expired voucher {code}, creating new one")
+                            # Optionally mark expired voucher (but don't redeem it, just note it's expired)
+                    except (ValueError, KeyError):
+                        # If we can't parse expiration, treat as expired and create new
+                        print(f"[INFO] Could not parse expiration for voucher {code}, creating new voucher")
+                        pass
         
         # Get employee's date of birth
         employee = None
@@ -258,9 +283,12 @@ class VoucherDatabase:
             print(f"[HISTORY] Saved {status} for voucher {voucher_code}")
         except Exception as e:
             print(f"Error saving to history: {e}")
-    
+
+
+   
+    '''
     def generate_qr_code(self, voucher_code):
-        """Generate QR code for voucher and save to file"""
+        Generate QR code for voucher and save to fil
         # Import QR system functions
         from qr_system import create_qr_code
         
@@ -274,6 +302,17 @@ class VoucherDatabase:
         img_base64 = base64.b64encode(buffered.getvalue()).decode()
         
         return f"data:image/png;base64,{img_base64}"
+    '''
+    
+    def generate_qr_code(self, voucher_code):
+        """Generate QR code for voucher and return a base64 data URL"""
+        from qr_system import create_qr_code
+        # single source of truth (now secure V2 payload)
+        return create_qr_code(voucher_code)
+
+    
+  
+
     
     def clear_voucher_history(self):
         """Clear voucher history (for testing)"""
@@ -381,8 +420,8 @@ def load_employees():
 def get_birthday_today():
     return db.get_birthday_today()
 
-def create_voucher(employee_id, employee_name):
-    return db.create_voucher(employee_id, employee_name)
+def create_voucher(employee_id, employee_name, force_new=True):
+    return db.create_voucher(employee_id, employee_name, force_new=force_new)
 
 def redeem_voucher(voucher_code):
     return db.redeem_voucher(voucher_code)
@@ -391,6 +430,7 @@ def check_voucher_status(voucher_code):
     return db.check_voucher_status(voucher_code)
 
 def get_voucher_info(voucher_code):
+
     return db.get_voucher_info(voucher_code)
 
 def cleanup_expired_vouchers():

@@ -2,10 +2,28 @@
 """
 Cafe Interface for BDVoucher - Improved UI with In-Page Camera
 Chill birthday design, mobile compatible, auto-scan on upload
+
+Cafe Interface for BDVoucher System
+Independent Flask app on its own port (default 5001)
+Handles voucher redemption by cafe staff or admins
 """
-from flask import Flask, render_template_string, request, jsonify
+
+    
+from flask import Flask, render_template_string, request, jsonify, session, redirect, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_login import current_user
+from flask_wtf.csrf import CSRFProtect
 from config import Config
 from database import redeem_voucher
+from auth import (
+    login_manager, User, authenticate_user, login_user, 
+    logout_user, login_required, cafe_required, generate_jwt_token
+)
+from security_helpers import (
+    csrf_protect, validate_voucher_code, sanitize_input,
+    add_security_headers, generate_csrf_token
+)
 import cv2
 import threading
 import time
@@ -15,20 +33,166 @@ from pyzbar.pyzbar import decode
 from werkzeug.utils import secure_filename
 import base64
 from io import BytesIO
+from qr_system import parse_qr_text
+
+
+# ======================================================
+# Flask App Setup
+# ======================================================
 
 app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'change-this-secret-key-in-production-12345')
 
-# Global variables for camera
-camera = None
-scanner_active = False
-scanner_result = None
-scanner_error = None
+# Initialize Flask-Login
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.session_protection = "strong"
 
-# Allowed file extensions for image upload
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+csrf = CSRFProtect(app)
+
+# Add security headers to all responses
+@app.after_request
+def set_security_headers(response):
+    return add_security_headers(response)
+
+
+
+# ======================================================
+# Templates
+# ======================================================
+# Login HTML template for cafe
+CAFE_LOGIN_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cafe Login - {{cafe_name}}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 50%, #fecfef 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+        }
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 25px;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.15);
+            max-width: 400px;
+            width: 100%;
+        }
+        h1 {
+            color: #d63384;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #495057;
+            font-weight: 600;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ffc1cc;
+            border-radius: 15px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        input:focus {
+            outline: none;
+            border-color: #ff6b9d;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #ff6b9d, #c44569);
+            color: white;
+            border: none;
+            border-radius: 15px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .error.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>🔐 Cafe Login</h1>
+        <div class="error" id="errorMsg"></div>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">Username:</label>
+                <input type="text" id="username" name="username" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
+            </div>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('errorMsg');
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    window.location.href = '/';
+                } else {
+                    errorMsg.textContent = data.message || 'Login failed';
+                    errorMsg.classList.add('show');
+                }
+            } catch (error) {
+                errorMsg.textContent = 'Error: ' + error.message;
+                errorMsg.classList.add('show');
+            }
+        });
+    </script>
+</body>
+</html>
+"""
 
 CAFE_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -36,7 +200,11 @@ CAFE_HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{{ cafe_name }} - Birthday Voucher Redemption</title>
+    <!-- Add jsQR library for QR code scanning -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    
     <style>
         * {
             margin: 0;
@@ -421,6 +589,8 @@ CAFE_HTML_TEMPLATE = """
     </style>
 </head>
 <body>
+
+
     <div class="container">
         <div class="header">
             <h1>🎂 {{ cafe_name }}</h1>
@@ -441,7 +611,10 @@ CAFE_HTML_TEMPLATE = """
                 <h4>📷 Camera Preview</h4>
                 <div class="camera-preview" id="cameraPreview">
                     <video id="video" autoplay muted playsinline></video>
-                    <div class="camera-overlay" id="cameraOverlay" style="display: none;"></div>
+                    <div class="camera-overlay" id="cameraOverlay" style="display: none;">
+                        <!-- Green scanning frame -->
+                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 250px; height: 250px; border: 3px solid #00ff00; border-radius: 10px; pointer-events: none;"></div>
+                    </div>
                 </div>
                 <div class="countdown" id="countdown" style="display: none;"></div>
             </div>
@@ -464,7 +637,7 @@ CAFE_HTML_TEMPLATE = """
             <h3>⌨️ Manual Entry</h3>
             <div class="form-group">
                 <label for="voucherCode">Voucher Code:</label>
-                <input type="text" id="voucherCode" placeholder="Enter 12-character voucher code" maxlength="12">
+                <input type="text" id="voucherCode" placeholder="Enter voucher code or scan QR code" maxlength="200">
             </div>
             <div style="text-align: center;">
                 <button class="btn btn-success" onclick="redeemVoucher()">🎫 Redeem Voucher</button>
@@ -483,10 +656,13 @@ CAFE_HTML_TEMPLATE = """
     </div>
 
     <script>
+        const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
         let scanning = false;
         let countdownTimer = null;
         let videoStream = null;
+        let scanInterval = null; // Add this new variable
 
+        
         function startCameraScan() {
             if (scanning) return;
             
@@ -496,50 +672,119 @@ CAFE_HTML_TEMPLATE = """
             document.getElementById('cameraContainer').style.display = 'block';
             document.getElementById('cameraStatus').style.display = 'block';
             document.getElementById('cameraPreview').style.display = 'block';
+            document.getElementById('statusText').textContent = 'Starting camera...';
             
-            // Start in-page camera
+            // Clear any previous results
+            document.getElementById('result').style.display = 'none';
+
+            // Start countdown
+            startCountdown();
+            
+            // Start in-page camera with QR scanning
             startInPageCamera();
-            
-            // Start backend camera scan
-            fetch('/start-camera-scan', {
+        }
+
+        function startInPageCamera() {
+            // Stop backend camera if it's running (cleanup)
+            fetch('/stop-camera-scan', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }
+            }).catch(error => console.log('Backend camera cleanup:', error));
+            
+            // Get user media with better constraints for QR scanning
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: 'environment', // Prefer rear camera
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
             })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    startCountdown();
-                    pollCameraScan();
-                } else {
-                    showResult('Failed to start camera scan: ' + data.message, 'error');
-                    stopCameraScan();
-                }
+            .then(stream => {
+                videoStream = stream;
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                document.getElementById('cameraOverlay').style.display = 'block';
+                document.getElementById('statusText').textContent = 'Camera ready - scanning for QR codes...';
+                
+                // Wait for video to be ready
+                video.onloadedmetadata = () => {
+                    // Start QR code scanning
+                    startQRScanning(video);
+                };
             })
             .catch(error => {
-                console.error('Error:', error);
-                showResult('Error starting camera scan: ' + error, 'error');
+                console.error('Error accessing camera:', error);
+                document.getElementById('statusText').textContent = 'Camera error: ' + error.message;
+                
+                if (error.name === 'NotAllowedError') {
+                    showResult('Camera permission denied. Please allow camera access in your browser settings.', 'error');
+                } else if (error.name === 'NotFoundError') {
+                    showResult('No camera found. Please check if your device has a camera.', 'error');
+                } else {
+                    showResult('Camera access error: ' + error.message, 'error');
+                }
+                
                 stopCameraScan();
             });
         }
 
-        function startInPageCamera() {
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(stream => {
-                    videoStream = stream;
-                    const video = document.getElementById('video');
-                    video.srcObject = stream;
-                    document.getElementById('cameraOverlay').style.display = 'block';
-                })
-                .catch(error => {
-                    console.error('Error accessing camera:', error);
-                    showResult('Camera access denied. Please allow camera permission.', 'error');
-                });
+        // Add this NEW function for QR scanning
+        function startQRScanning(videoElement) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            
+            // Scan for QR codes every 300ms (faster response)
+            scanInterval = setInterval(() => {
+                if (!scanning || videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA) {
+                    return;
+                }
+                
+                try {
+                    // Set canvas dimensions to match video
+                    canvas.width = videoElement.videoWidth;
+                    canvas.height = videoElement.videoHeight;
+                    
+                    // Draw video frame to canvas
+                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                    
+                    // Get image data for QR scanning
+                    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    // Use jsQR library to detect QR codes
+                    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: "dontInvert",
+                    });
+                    
+                    if (code) {
+                        console.log('QR code detected:', code.data);
+                        document.getElementById('statusText').textContent = '✅ QR code detected! Validating...';
+                        
+                        // Add visual feedback
+                        const overlay = document.getElementById('cameraOverlay');
+                        overlay.style.borderColor = '#00ff00';
+                        overlay.style.backgroundColor = 'rgba(0, 255, 0, 0.1)';
+                        
+                        // Validate the scanned code
+                        validateVoucher(code.data);
+                        stopCameraScan();
+                    }
+                } catch (error) {
+                    console.error('QR scanning error:', error);
+                }
+            }, 300); // Scan every 300ms for better responsiveness
         }
 
+        
         function stopCameraScan() {
             if (!scanning) return;
             
             scanning = false;
+            
+            // Stop QR scanning
+            if (scanInterval) {
+                clearInterval(scanInterval);
+                scanInterval = null;
+            }
             
             // Stop in-page camera
             if (videoStream) {
@@ -553,31 +798,30 @@ CAFE_HTML_TEMPLATE = """
                 countdownTimer = null;
             }
             
-            // Stop backend camera
+            // Stop backend camera (cleanup)
             fetch('/stop-camera-scan', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('cameraBtn').style.display = 'inline-block';
-                document.getElementById('stopCameraBtn').style.display = 'none';
-                document.getElementById('cameraContainer').style.display = 'none';
-                document.getElementById('cameraStatus').style.display = 'none';
-                document.getElementById('cameraPreview').style.display = 'none';
-                document.getElementById('cameraOverlay').style.display = 'none';
-                showResult('Camera scan stopped.', 'info');
-                setTimeout(() => {
-                    clearForm();
-                }, 1000);
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF }
+            }).catch(error => console.log('Backend camera stop:', error));
+            
+            // Update UI
+            document.getElementById('cameraBtn').style.display = 'inline-block';
+            document.getElementById('stopCameraBtn').style.display = 'none';
+            document.getElementById('cameraContainer').style.display = 'none';
+            document.getElementById('cameraStatus').style.display = 'none';
+            document.getElementById('cameraPreview').style.display = 'none';
+            document.getElementById('cameraOverlay').style.display = 'none';
+            
+            // Reset overlay styles
+            const overlay = document.getElementById('cameraOverlay');
+            overlay.style.borderColor = '';
+            overlay.style.backgroundColor = '';
         }
 
+
+        // NEW: Add the startCountdown function
         function startCountdown() {
-            let timeLeft = 30;
+            let timeLeft = 120; // 2 minutes
             const countdownElement = document.getElementById('countdown');
             countdownElement.style.display = 'block';
             
@@ -587,53 +831,20 @@ CAFE_HTML_TEMPLATE = """
                     return;
                 }
                 
-                countdownElement.textContent = `Auto-close in ${timeLeft} seconds`;
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                countdownElement.textContent = `⏰ ${minutes}:${seconds.toString().padStart(2, '0')} remaining`;
                 timeLeft--;
                 
                 if (timeLeft < 0) {
                     clearInterval(countdownTimer);
+                    showResult('Scanning time expired. Please try again.', 'info');
                     stopCameraScan();
                 }
             }, 1000);
         }
 
-        function pollCameraScan() {
-            if (!scanning) return;
-            
-            fetch('/check-camera-scan')
-            .then(res => res.json())
-            .then(data => {
-                if (data.detected) {
-                    console.log('QR code detected:', data.result);
-                    stopCameraScan();
-                    validateVoucher(data.result);
-                } else if (data.error) {
-                    console.log('Camera scan error:', data.error);
-                    showFullScreenResult('Error', 'Camera scan error: ' + data.error, 'error');
-                    stopCameraScan();
-                } else if (data.active) {
-                    setTimeout(pollCameraScan, 1000);
-                } else {
-                    console.log('Scanner not active, stopping polling');
-                    scanning = false;
-                    document.getElementById('cameraBtn').style.display = 'inline-block';
-                    document.getElementById('stopCameraBtn').style.display = 'none';
-                    document.getElementById('cameraContainer').style.display = 'none';
-                    document.getElementById('cameraStatus').style.display = 'none';
-                    document.getElementById('cameraPreview').style.display = 'none';
-                    showResult('Camera scan completed.', 'info');
-                    setTimeout(() => {
-                        clearForm();
-                    }, 2000);
-                }
-            })
-            .catch(error => {
-                console.error('Polling error:', error);
-                if (scanning) {
-                    setTimeout(pollCameraScan, 1000);
-                }
-            });
-        }
+        
 
         function handleImageUpload() {
             const fileInput = document.getElementById('imageUpload');
@@ -659,21 +870,37 @@ CAFE_HTML_TEMPLATE = """
             const formData = new FormData();
             formData.append('image', file);
             
+            
             fetch('/scan-image', {
                 method: 'POST',
+                headers: { 'X-CSRF-Token': CSRF },
                 body: formData
             })
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok) {
+                    return res.json().then(data => {
+                        throw new Error(data.message || 'Scan failed');
+                    });
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.success && data.code) {
+                    // Automatically validate the scanned code
                     validateVoucher(data.code);
                 } else {
-                    showResult('No QR code found in image.', 'error');
+                    showFullScreenResult('Scan Failed', data.message || 'No valid voucher QR code found in image. Please ensure the QR code is clear and not damaged.', 'error');
+                    setTimeout(() => {
+                        clearForm();
+                    }, 4000);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                showResult('Error scanning image: ' + error, 'error');
+                showFullScreenResult('Scan Error', error.message || 'Error scanning image. Please try again or use manual entry.', 'error');
+                setTimeout(() => {
+                    clearForm();
+                }, 4000);
             });
         }
 
@@ -685,8 +912,9 @@ CAFE_HTML_TEMPLATE = """
                 return;
             }
             
-            if (code.length !== 12) {
-                showResult('Voucher code must be 12 characters long.', 'error');
+            // Allow both V2 secure codes (longer format) and V1 codes (12 characters)
+            if (code.length < 8) {
+                showResult('Voucher code is too short.', 'error');
                 return;
             }
             
@@ -694,31 +922,45 @@ CAFE_HTML_TEMPLATE = """
         }
 
         function validateVoucher(code) {
+            // Show loading state
+            showResult('Validating voucher code...', 'info');
+            
             fetch('/redeem', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
                 body: JSON.stringify({ code: code })
             })
-            .then(res => res.json())
+            .then(res => {
+                if (!res.ok) {
+                    return res.json().then(data => {
+                        throw new Error(data.message || 'Validation failed');
+                    });
+                }
+                return res.json();
+            })
             .then(data => {
                 if (data.success) {
-                    showFullScreenResult('Success!', `Voucher redeemed successfully for ${data.employee_name}!`, 'success');
-                    setTimeout(() => {
-                        clearForm();
-                    }, 2000);
-                } else {
-                    showFullScreenResult('Error', data.message, 'error');
+                    showFullScreenResult('Success! 🎉', `Voucher redeemed successfully for ${data.employee_name}!`, 'success');
                     setTimeout(() => {
                         clearForm();
                     }, 3000);
+                } else {
+                    showFullScreenResult('Error', data.message || 'Failed to redeem voucher', 'error');
+                    setTimeout(() => {
+                        clearForm();
+                    }, 4000);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                showFullScreenResult('Error', 'Network error: ' + error, 'error');
+                let errorMsg = 'Network error occurred';
+                if (error.message) {
+                    errorMsg = error.message;
+                }
+                showFullScreenResult('Error', errorMsg, 'error');
                 setTimeout(() => {
                     clearForm();
-                }, 3000);
+                }, 4000);
             });
         }
 
@@ -778,16 +1020,91 @@ CAFE_HTML_TEMPLATE = """
 </html>
 """
 
+
+
+@app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def login():
+    """Cafe login"""
+    if current_user.is_authenticated:
+        return redirect('/')
+    
+    if request.method == 'POST':
+        data = request.json if request.is_json else request.form
+        username = sanitize_input(data.get('username', ''))
+        password = data.get('password', '')
+
+        if not username or not password:
+            return jsonify({'success': False, 'message': 'Username and password required'}), 400
+
+        user = authenticate_user(username, password)
+        if user:
+            if user.role not in ['cafe', 'admin']:
+                return jsonify({'success': False, 'message': 'Cafe access required'}), 403
+
+            login_user(user)
+            token = generate_jwt_token(user)
+            return jsonify({
+                'success': True,
+                'message': 'Login successful',
+                'token': token,
+                'user': {
+                    'username': user.username,
+                    'role': user.role
+                }
+            })
+
+        return jsonify({'success': False, 'message': 'Invalid username or password'}), 401
+
+    return render_template_string(CAFE_LOGIN_TEMPLATE, cafe_name=Config.CAFE_NAME)
+
+@app.route('/logout')
+@login_required
+def logout():
+    """Logout"""
+    logout_user()
+    return redirect('/login')  
+
 @app.route('/')
+@login_required
+@cafe_required
 def index():
     """Cafe redemption page"""
+    generate_csrf_token()  # Generate CSRF token
     return render_template_string(CAFE_HTML_TEMPLATE, 
                                 cafe_name=Config.CAFE_NAME, 
                                 cafe_location=Config.CAFE_LOCATION)
 
+# ======================================================
+# QR / Camera Endpoints
+# ======================================================
+
+# Global variables for camera
+camera = None
+scanner_active = False
+scanner_result = None
+scanner_error = None
+
+# Allowed file extensions for image upload
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
 @app.route('/start-camera-scan', methods=['POST'])
+@csrf.exempt  # Exempt CSRF for API calls
+@limiter.limit("120 per minute")
 def start_camera_scan():
     """Start the camera scan"""
+    # Check authentication manually to return JSON instead of HTML redirect
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'message': 'Authentication required. Please log in.'}), 401
+    
+    # Check cafe role
+    if not hasattr(current_user, 'role') or current_user.role not in ['cafe', 'admin']:
+        return jsonify({'success': False, 'message': 'Cafe access required'}), 403
+    
     global camera, scanner_active, scanner_result, scanner_error
     
     if scanner_active:
@@ -809,8 +1126,18 @@ def start_camera_scan():
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/stop-camera-scan', methods=['POST'])
+@csrf.exempt  # Exempt CSRF for API calls
+@limiter.limit("120 per minute")
 def stop_camera_scan():
     """Stop the camera scan"""
+    # Check authentication manually to return JSON instead of HTML redirect
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'message': 'Authentication required. Please log in.'}), 401
+    
+    # Check cafe role
+    if not hasattr(current_user, 'role') or current_user.role not in ['cafe', 'admin']:
+        return jsonify({'success': False, 'message': 'Cafe access required'}), 403
+    
     global camera, scanner_active, scanner_result, scanner_error
     
     scanner_active = False
@@ -824,8 +1151,26 @@ def stop_camera_scan():
     return jsonify({'success': True, 'message': 'Camera scan stopped'})
 
 @app.route('/check-camera-scan')
+@csrf.exempt  # Exempt CSRF for API calls
+@limiter.limit("120 per minute")
 def check_camera_scan():
     """Check camera scan status and return any detected codes"""
+    # Check authentication manually to return JSON instead of HTML redirect
+    if not current_user.is_authenticated:
+        return jsonify({
+            'active': False,
+            'detected': False,
+            'error': 'Authentication required'
+        }), 401
+    
+    # Check cafe role
+    if not hasattr(current_user, 'role') or current_user.role not in ['cafe', 'admin']:
+        return jsonify({
+            'active': False,
+            'detected': False,
+            'error': 'Cafe access required'
+        }), 403
+    
     global scanner_active, scanner_result, scanner_error
     
     if scanner_error:
@@ -850,127 +1195,298 @@ def check_camera_scan():
     })
 
 @app.route('/scan-image', methods=['POST'])
+@csrf.exempt  # Exempt CSRF for file uploads - we'll handle auth separately
+@limiter.limit("120 per minute")
 def scan_image():
     """Scan QR code from uploaded image"""
+    # Check authentication manually to return JSON instead of HTML redirect
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'message': 'Authentication required. Please log in.'}), 401
+    
+    # Check cafe role
+    if not hasattr(current_user, 'role') or current_user.role not in ['cafe', 'admin']:
+        return jsonify({'success': False, 'message': 'Cafe access required'}), 403
+    
     try:
         if 'image' not in request.files:
-            return jsonify({'success': False, 'message': 'No image file provided'})
+            return jsonify({'success': False, 'message': 'No image file provided'}), 400
         
         file = request.files['image']
         
         if file.filename == '':
-            return jsonify({'success': False, 'message': 'No image file selected'})
+            return jsonify({'success': False, 'message': 'No image file selected'}), 400
         
         if not allowed_file(file.filename):
-            return jsonify({'success': False, 'message': 'Invalid file type'})
+            return jsonify({'success': False, 'message': 'Invalid file type. Please upload PNG, JPG, JPEG, GIF, or BMP images.'}), 400
         
         # Read image data
         image_data = file.read()
+        if not image_data:
+            return jsonify({'success': False, 'message': 'Image file is empty'}), 400
+        
         nparr = np.frombuffer(image_data, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if image is None:
-            return jsonify({'success': False, 'message': 'Could not decode image'})
+            return jsonify({'success': False, 'message': 'Could not decode image. Please ensure the file is a valid image.'}), 400
         
         # Decode QR codes
-        decoded_objects = decode(image)
-        
+        try:
+            decoded_objects = decode(image)
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'Error decoding QR code: {str(e)}'}), 500
+
         if decoded_objects:
-            qr_data = decoded_objects[0].data.decode("utf-8")
-            
-            # Check if it's a valid voucher code (12 characters, alphanumeric)
-            if len(qr_data) == 12 and qr_data.isalnum():
-                return jsonify({'success': True, 'code': qr_data})
-            else:
-                return jsonify({'success': False, 'message': 'Invalid voucher code format'})
-        else:
-            return jsonify({'success': False, 'message': 'No QR code found'})
-    
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'Error scanning image: {str(e)}'})
-
-def camera_scan_thread():
-    """Camera scan thread - simplified and clean"""
-    global camera, scanner_active, scanner_result, scanner_error
-    
-    try:
-        # Open camera
-        camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        if not camera.isOpened():
-            camera = cv2.VideoCapture(0)
-        
-        if not camera.isOpened():
-            scanner_error = "Could not access camera"
-            scanner_active = False
-            return
-
-        detected = set()
-        start_time = time.time()
-        timeout = 30.0  # Auto-close after 30 seconds
-        
-        while scanner_active:
-            current_time = time.time()
-            
-            # Check timeout
-            if current_time - start_time >= timeout:
-                break
-            
-            ret, frame = camera.read()
-            if not ret:
-                break
-
-            # Detect and decode QR codes
-            decoded_objects = decode(frame)
+            # Try each detected QR code until we find a valid voucher
+            qr_data_list = []
+            last_error = None
             
             for obj in decoded_objects:
-                qr_data = obj.data.decode("utf-8")
-                points = obj.polygon
-
-                # Draw bounding box
-                if len(points) > 4:
-                    hull = cv2.convexHull(points)
-                    points = hull
-
-                n = len(points)
-                for j in range(n):
-                    pt1 = (points[j].x, points[j].y)
-                    pt2 = (points[(j + 1) % n].x, points[(j + 1) % n].y)
-                    cv2.line(frame, pt1, pt2, (0, 255, 0), 3)
-
-                # Display text
-                cv2.putText(frame, qr_data, (points[0].x, points[0].y - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-                
-                if qr_data not in detected:
-                    detected.add(qr_data)
+                try:
+                    qr_data = obj.data.decode("utf-8").strip()
+                    if not qr_data:
+                        continue
                     
-                    # Check if it's a valid voucher code (12 characters, alphanumeric)
-                    if len(qr_data) == 12 and qr_data.isalnum():
-                        scanner_result = qr_data
-                        scanner_active = False
-                        break
+                    # Store QR data for error reporting
+                    qr_data_list.append(qr_data[:100])  # Store first 100 chars for debugging
+                    
+                    # Parse QR code (handles both V1 and V2)
+                    # allow_expired=True so we extract code even if expired (check expiration at redemption)
+                    try:
+                        code = parse_qr_text(qr_data, allow_expired=True)
+                        if code:
+                            # Log what we found for debugging
+                            print(f"[IMAGE SCAN] Successfully extracted code: {code} from QR data: {qr_data[:50]}...")
+                            return jsonify({'success': True, 'code': code})
+                    except ValueError as e:
+                        # Log the error for debugging
+                        error_msg = str(e)
+                        last_error = error_msg
+                        print(f"[IMAGE SCAN] Parse error for QR data '{qr_data[:50]}...': {error_msg}")
+                        
+                        # If it's a signature error, this QR is definitely invalid
+                        if "signature" in error_msg.lower() or "tampered" in error_msg.lower():
+                            continue
+                        
+                        # For other errors (like expired), we might still want to try to extract
+                        # But if parsing fails completely, continue to next QR code
+                        continue
+                    except Exception as e:
+                        # Log unexpected errors
+                        last_error = str(e)
+                        print(f"[IMAGE SCAN] Unexpected error parsing QR: {e}")
+                        # Error parsing, try next QR code
+                        continue
+                except Exception as e:
+                    # Error decoding this QR code, try next
+                    last_error = f"Decode error: {str(e)}"
+                    continue
+            
+            # No valid voucher QR codes found - provide helpful error message
+            error_message = 'No valid voucher QR code detected in image.'
+            if qr_data_list:
+                error_message += f' Found {len(qr_data_list)} QR code(s) but could not parse as voucher codes.'
+                if last_error:
+                    error_message += f' Last error: {last_error}'
+            else:
+                error_message += ' Please ensure the QR code is clear and visible in the image.'
+            
+            return jsonify({'success': False, 'message': error_message}), 400
+        else:
+            return jsonify({
+                'success': False, 
+                'message': 'No QR code detected in image. Please ensure: 1) The QR code is clear and not blurry, 2) The image is well-lit, 3) The QR code is fully visible, 4) The image format is supported (PNG, JPG, JPEG, GIF, BMP)'
+            }), 400
 
-            cv2.imshow("QR Code Scanner", frame)
+    except Exception as e:
+        import traceback
+        print(f"Error scanning image: {traceback.format_exc()}")
+        return jsonify({'success': False, 'message': f'Error scanning image: {str(e)}'}), 500
 
-            # Check for 'q' key press
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+def camera_scan_thread():
+    """Robust camera scanner: tries multiple camera indices/backends, decodes in grayscale,
+    supports secured V2 (parse_qr_text) with legacy 12-char fallback, and returns the first valid code.
+    """
+    import time
+    import cv2
+    from pyzbar.pyzbar import decode
+
+    global camera, scanner_active, scanner_result, scanner_error
+
+    try:
+        # --- Open camera robustly (try multiple indices, two backends) ---
+        indices_to_try = [0, 1, 2, 3]
+        camera = None
+
+        for idx in indices_to_try:
+            # Windows-friendly first attempt
+            cam = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            if not cam.isOpened():
+                # Fallback backend
+                cam.release()
+                cam = cv2.VideoCapture(idx)
+
+            if cam.isOpened():
+                # Use HD for better QR detection
+                cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+                camera = cam
+                print(f"[CAMERA] Opened camera index {idx}")
                 break
+
+        if not camera or not camera.isOpened():
+            scanner_error = "Could not access camera (all indices failed)"
+            scanner_active = False
+            print("[CAMERA] ERROR - no camera available")
+            return
+
+        detected_codes = set()
+        start_time = time.time()
+        timeout_secs = 120.0  # adjust if you want shorter/longer window
+
+        while scanner_active:
+            # Timeout guard
+            if (time.time() - start_time) >= timeout_secs:
+                scanner_error = f"Camera scan timed out after {int(timeout_secs)} seconds"
+                scanner_active = False
+                print("[CAMERA] Timeout")
+                break
+
+            ok, frame = camera.read()
+            if not ok:
+                # Keep trying a few frames rather than quitting immediately
+                continue
+
+            # Grayscale improves QR decode reliability in many cases
+            try:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            except Exception:
+                gray = frame
+
+            try:
+                decoded_objects = decode(gray)
+            except Exception as e:
+                # If pyzbar hiccups, skip this frame
+                decoded_objects = []
+                # Optional: print(f"[CAMERA] Decode error: {e}")
+
+            for obj in decoded_objects:
+                # Best-effort decode of the QR text
+                try:
+                    raw = obj.data.decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    raw = None
+
+                if not raw:
+                    continue
+
+                # Try secured V2 first (parse_qr_text). If it fails, fallback to legacy 12-char alnum.
+                code = None
+                try:
+                    from qr_system import parse_qr_text
+                    # allow_expired=True lets us extract the code; you still enforce expiry at redemption
+                    code = parse_qr_text(raw, allow_expired=True)
+                except Exception:
+                    if len(raw) == 12 and raw.isalnum():
+                        code = raw
+
+                if code and code not in detected_codes:
+                    detected_codes.add(code)
+                    scanner_result = code
+                    scanner_active = False
+                    print(f"[CAMERA] Detected voucher code: {code}")
+                    break  # stop inner loop
+
+            if scanner_result:
+                break  # stop outer while
 
     except Exception as e:
         scanner_error = str(e)
-    finally:
         scanner_active = False
-        if camera:
-            camera.release()
-            camera = None
-        cv2.destroyAllWindows()
+        print(f"[CAMERA] Unexpected error: {e}")
+
+    finally:
+        # Always release resources
+        try:
+            if camera:
+                camera.release()
+        except Exception:
+            pass
+        camera = None
+
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
 
 @app.route('/redeem', methods=['POST'])
+@csrf.exempt  # Exempt CSRF - we handle auth separately and validate input
+@limiter.limit("20 per minute")
 def redeem():
-    """Redeem a voucher"""
-    data = request.json
-    code = data.get('code', '')
+    """Redeem a voucher (accept JSON or form)"""
+    # Check authentication manually to return JSON instead of HTML redirect
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'message': 'Authentication required. Please log in.'}), 401
     
+    # Check cafe role
+    if not hasattr(current_user, 'role') or current_user.role not in ['cafe', 'admin']:
+        return jsonify({'success': False, 'message': 'Cafe access required'}), 403
+    
+    if request.is_json:
+        raw = (request.json or {}).get('code', '')
+    else:
+        raw = request.form.get('code', '') or request.values.get('code', '')
+    raw = (raw or '').strip()  # ✅ ONLY trim whitespace here
+
+    if not raw:
+        return jsonify({'success': False, 'message': 'Voucher code is required'}), 400
+
+    # Normalize (handles V2 "V2|...|sig" and legacy codes)
+    from qr_system import parse_qr_text
+    
+    try:
+        code = parse_qr_text(raw)       # ✅ returns the plain voucher code
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Invalid QR code: {str(e)}'}), 400
+
+    # Now it's safe to sanitize the plain code if you want
+    code = sanitize_input(code)
+
+    # Validate & redeem
+    is_valid, msg = validate_voucher_code(code)
+    if not is_valid:
+        return jsonify({'success': False, 'message': msg}), 400
+
+    ok, res = redeem_voucher(code)
+    if ok:
+        return jsonify({
+            'success': True,
+            'employee_name': res['employee_name'],
+            'message': 'Voucher redeemed successfully!'
+        })
+    return jsonify({'success': False, 'message': res}), 400
+
+    '''
+    """Redeem a voucher"""
+    # Validate JSON request
+    if not request.is_json:
+        return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+    
+    data = request.json
+    raw_code = sanitize_input(data.get('code', ''))
+
+    try:
+        # Parse secured QR or legacy code into normalized voucher code
+        code = parse_qr_text(raw_code)
+    except Exception as e:
+        return jsonify({'success': False, 'message': f"Invalid QR code: {e}"}), 400
+
+    # Validate voucher code format (still applies to legacy and V2 decoded form)
+    is_valid, message = validate_voucher_code(code)
+    if not is_valid:
+        return jsonify({'success': False, 'message': message}), 400
+    
+    # Redeem voucher
     success, result = redeem_voucher(code)
     
     if success:
@@ -983,7 +1499,8 @@ def redeem():
         return jsonify({
             'success': False,
             'message': result
-        })
+        }), 400
+    '''
 
 if __name__ == '__main__':
     print(f"Starting {Config.CAFE_NAME} Cafe Interface (Improved UI & In-Page Camera)...")

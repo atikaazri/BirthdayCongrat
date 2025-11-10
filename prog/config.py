@@ -51,7 +51,15 @@ class Config:
     PORT = int(os.getenv('PORT', 5000))
     CAFE_PORT = int(os.getenv('CAFE_PORT', 5001))
     ADMIN_PORT = int(os.getenv('ADMIN_PORT', 5002))
-    DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+    DEBUG = os.getenv('DEBUG', 'False').lower() == 'True'
+
+    # Security / features
+    SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
+    JWT_SECRET = os.getenv("JWT_SECRET", "change-me-too")
+    SECURE_QR_ENABLED = os.getenv("SECURE_QR_ENABLED", "false").lower() == "true"
+
+    # CSRF
+    CSRF_COOKIE_NAME = "csrf_token"
     
     @classmethod
     def get_voucher_validity_hours(cls):

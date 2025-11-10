@@ -2,8 +2,13 @@
 """
 BDVoucher - Birthday Voucher System
 Main Flask application
+
+BDVoucher - Landing Page
+Simple homepage linking to the Cafe and Admin interfaces.
 """
 from flask import Flask, render_template_string, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from config import Config
 from database import (
     load_employees, get_birthday_today, create_voucher, 
@@ -12,10 +17,31 @@ from database import (
 )
 from whatsapp_service import send_whatsapp_message
 from auto_messaging import start_auto_messaging, stop_auto_messaging, test_auto_messaging
-import csv
+from security_helpers import (
+    validate_voucher_code, sanitize_input,
+    add_security_headers
+)
+import os
+
+
 
 # ============= FLASK APPLICATION =============
 app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'change-this-secret-key-in-production-12345')
+
+
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# Add security headers to all responses
+@app.after_request
+def set_security_headers(response):
+    return add_security_headers(response)
 
 # Simple HTML template
 HTML_TEMPLATE = """
@@ -61,10 +87,12 @@ HTML_TEMPLATE = """
         <div class="header">
             <h1>🎉 {{cafe_name}} - Voucher System</h1>
             <p>📍 {{cafe_location}}</p>
+            
             <div class="nav-links">
-                <a href="http://localhost:5001" target="_blank" class="nav-link">🏪 Open Cafe Interface</a>
-                <a href="http://localhost:5002" target="_blank" class="nav-link">⚙️ Admin Interface</a>
+                <a href="http://localhost:5001/login" target="_blank" class="nav-link">🏪 Cafe Login</a>
+                <a href="http://localhost:5002/login" target="_blank" class="nav-link">⚙️ Admin Login</a>
             </div>
+
         </div>
         
         <div class="section">
@@ -233,6 +261,8 @@ HTML_TEMPLATE = """
 </html>
 """
 
+# ============= ROUTE =============
+
 @app.route('/')
 def index():
     """Main page"""
@@ -241,10 +271,20 @@ def index():
                                 cafe_location=Config.CAFE_LOCATION)
 
 @app.route('/redeem', methods=['POST'])
+@limiter.limit("20 per minute")
 def redeem():
     """Redeem a voucher"""
+    # Validate JSON request
+    if not request.is_json:
+        return jsonify({'success': False, 'message': 'Content-Type must be application/json'}), 400
+    
     data = request.json
-    code = data.get('code', '')
+    code = sanitize_input(data.get('code', ''))
+    
+    # Validate voucher code format
+    is_valid, message = validate_voucher_code(code)
+    if not is_valid:
+        return jsonify({'success': False, 'message': message}), 400
     
     success, result = redeem_voucher(code)
     
@@ -258,22 +298,25 @@ def redeem():
         return jsonify({
             'success': False,
             'message': result
-        })
+        }), 400
 
 
 @app.route('/status')
+@limiter.limit("30 per minute")
 def status():
     """Get system status"""
     refresh_data()  # Refresh data from CSV before getting stats
     return jsonify(get_system_stats())
 
 @app.route('/history')
+@limiter.limit("30 per minute")
 def history():
     """Get voucher history"""
     refresh_data()  # Refresh data from CSV before getting history
     return jsonify({'history': get_voucher_history()})
 
 @app.route('/send-birthday', methods=['POST'])
+@limiter.limit("10 per hour")
 def send_birthday():
     """Send birthday wishes to employees with birthdays today"""
     try:
@@ -326,6 +369,7 @@ def send_birthday():
         })
 
 @app.route('/test-auto-messaging', methods=['POST'])
+@limiter.limit("5 per hour")
 def test_auto_messaging_endpoint():
     """Test automatic messaging system"""
     try:
