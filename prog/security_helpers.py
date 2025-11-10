@@ -18,12 +18,15 @@ def validate_voucher_code(code):
     if not isinstance(code, str):
         return False, "Voucher code must be a string"
     
-    # Check length (12 characters for standard, or longer for secure codes)
-    if len(code) < 12 or len(code) > 100:
+    code = code.strip()
+    
+    # Check length (12 characters for standard voucher codes)
+    # V2 secure codes are parsed before this validation, so this should only see the extracted code
+    if len(code) < 8 or len(code) > 50:
         return False, "Invalid voucher code length"
     
-    # Check format (alphanumeric or with separators for secure codes)
-    if not re.match(r'^[A-Za-z0-9|_\-\.]+$', code):
+    # Check format (alphanumeric only for voucher codes after parsing)
+    if not re.match(r'^[A-Za-z0-9]+$', code):
         return False, "Voucher code contains invalid characters"
     
     return True, "Valid"
@@ -147,7 +150,16 @@ def add_security_headers(response):
     #response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     #response.headers['Content-Security-Policy'] = "default-src 'self'"
 
-    response.headers['Content-Security-Policy'] = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';"
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+
+    response.headers['Content-Security-Policy'] = csp
     # other security headers you may keep:
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'DENY'
@@ -194,4 +206,5 @@ def validate_input(data, schema):
         return False, errors
     
     return True, {}
+
 

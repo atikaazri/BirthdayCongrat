@@ -989,6 +989,117 @@ def clear_history():
             'message': f'Error clearing history: {str(e)}'
         })
 
+@app.route('/send-birthday', methods=['POST'])
+@login_required
+@admin_required
+@limiter.limit("10 per hour")
+def send_birthday():
+    """Send birthday wishes to employees with birthdays today"""
+    try:
+        # Check if force_new parameter is provided (for testing)
+        data = request.json if request.is_json else request.form
+        force_new = data.get('force_new', 'false').lower() == 'true' if data else False
+        
+        refresh_data()
+        birthdays = get_birthday_today()
+        
+        if not birthdays:
+            return jsonify({
+                'success': False,
+                'message': 'No birthdays today'
+            })
+        
+        results = []
+        for employee in birthdays:
+            try:
+                # Create voucher (with force_new for testing)
+                voucher_code = create_voucher(
+                    employee['employee_id'], 
+                    employee['employee_name'],
+                    force_new=force_new
+                )
+                
+                # Generate QR code
+                qr_code = generate_qr_code(voucher_code)
+                
+                # Send WhatsApp message
+                success = send_whatsapp_message(
+                    employee['phone_number'],
+                    employee['employee_name'],
+                    voucher_code
+                )
+                
+                results.append({
+                    'employee_name': employee['employee_name'],
+                    'voucher_code': voucher_code,
+                    'message_sent': success
+                })
+                
+            except Exception as e:
+                results.append({
+                    'employee_name': employee['employee_name'],
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'success': True,
+            'message': f'Processed {len(birthdays)} birthdays',
+            'results': results
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        })
+
+@app.route('/regenerate-voucher', methods=['POST'])
+@login_required
+@admin_required
+@limiter.limit("10 per hour")
+def regenerate_voucher():
+    """Regenerate voucher for an employee (for testing)"""
+    try:
+        data = request.json if request.is_json else request.form
+        employee_id = sanitize_input(data.get('employee_id', ''))
+        
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID required'}), 400
+        
+        refresh_data()
+        employees = load_employees()
+        employee = None
+        for emp in employees:
+            if emp['employee_id'] == employee_id:
+                employee = emp
+                break
+        
+        if not employee:
+            return jsonify({'success': False, 'message': 'Employee not found'}), 404
+        
+        # Force create new voucher
+        voucher_code = create_voucher(
+            employee['employee_id'],
+            employee['employee_name'],
+            force_new=True
+        )
+        
+        # Generate QR code
+        qr_code = generate_qr_code(voucher_code)
+        
+        return jsonify({
+            'success': True,
+            'message': f'New voucher generated for {employee["employee_name"]}',
+            'voucher_code': voucher_code,
+            'employee_name': employee['employee_name']
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
 
 # ============= MAIN =============
 if __name__ == '__main__':

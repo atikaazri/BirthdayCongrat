@@ -111,16 +111,40 @@ class VoucherDatabase:
         import uuid
         return str(uuid.uuid4()).replace("-", "").upper()[:12]
     
-    def create_voucher(self, employee_id, employee_name):
-        """Create a voucher with secure code"""
+    def create_voucher(self, employee_id, employee_name, force_new=False):
+        """
+        Create a voucher with secure code
+        
+        Args:
+            employee_id: Employee ID
+            employee_name: Employee name
+            force_new: If True, create a new voucher even if employee has an active one (for testing)
+        
+        Returns:
+            Voucher code
+        """
         # Reload vouchers to ensure we have latest data
         self.load_vouchers_from_csv()
         
-        # Check if employee already has an active voucher
-        for code, voucher in self.vouchers_db.items():
-            if voucher['employee_id'] == employee_id and not voucher['redeemed']:
-                # Employee already has an active voucher, return existing code
-                return code
+        # Check if employee already has an active (non-expired, non-redeemed) voucher
+        if not force_new:
+            for code, voucher in self.vouchers_db.items():
+                if voucher['employee_id'] == employee_id and not voucher['redeemed']:
+                    # Check if the voucher is expired
+                    try:
+                        expires_at = datetime.fromisoformat(voucher['expires_at'])
+                        if datetime.now() <= expires_at:
+                            # Employee already has an active, non-expired voucher
+                            print(f"[INFO] Employee {employee_id} already has active voucher {code}")
+                            return code
+                        else:
+                            # Voucher is expired, mark it as such and create a new one
+                            print(f"[INFO] Employee {employee_id} has expired voucher {code}, creating new one")
+                            # Optionally mark expired voucher (but don't redeem it, just note it's expired)
+                    except (ValueError, KeyError):
+                        # If we can't parse expiration, treat as expired and create new
+                        print(f"[INFO] Could not parse expiration for voucher {code}, creating new voucher")
+                        pass
         
         # Get employee's date of birth
         employee = None
@@ -396,8 +420,8 @@ def load_employees():
 def get_birthday_today():
     return db.get_birthday_today()
 
-def create_voucher(employee_id, employee_name):
-    return db.create_voucher(employee_id, employee_name)
+def create_voucher(employee_id, employee_name, force_new=True):
+    return db.create_voucher(employee_id, employee_name, force_new=force_new)
 
 def redeem_voucher(voucher_code):
     return db.redeem_voucher(voucher_code)

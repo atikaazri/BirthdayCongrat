@@ -27,10 +27,36 @@ class SecureQR:
         Initialize secure QR generator
         
         Args:
-            secret_key: Secret key for HMAC signing (defaults to environment variable)
+            secret_key: Secret key for HMAC signing (defaults to environment variable or persistent file)
         """
         env_key = os.getenv('VOUCHER_SECRET_KEY')
-        self.secret_key = secret_key or env_key or secrets.token_urlsafe(32)
+        
+        if secret_key:
+            self.secret_key = secret_key
+        elif env_key:
+            self.secret_key = env_key
+        else:
+            # Try to load from persistent file, or create a new one
+            secret_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', '.voucher_secret_key')
+            try:
+                if os.path.exists(secret_file):
+                    with open(secret_file, 'r') as f:
+                        self.secret_key = f.read().strip()
+                    if len(self.secret_key) < 32:
+                        raise ValueError("Secret key in file is too short")
+                else:
+                    # Generate new key and save it
+                    self.secret_key = secrets.token_urlsafe(32)
+                    os.makedirs(os.path.dirname(secret_file), exist_ok=True)
+                    with open(secret_file, 'w') as f:
+                        f.write(self.secret_key)
+                    print(f"[INFO] Generated new VOUCHER_SECRET_KEY and saved to {secret_file}")
+                    print(f"[INFO] For production, set VOUCHER_SECRET_KEY environment variable instead")
+            except Exception as e:
+                # Fallback to generating a new key (but it won't be persistent)
+                print(f"[WARNING] Could not load/save secret key file: {e}")
+                self.secret_key = secrets.token_urlsafe(32)
+                print(f"[WARNING] Using temporary secret key - QR codes may not validate after restart!")
         
         if len(self.secret_key) < 32:
             raise ValueError("Secret key must be at least 32 characters long")

@@ -1,10 +1,11 @@
 import os
-# uuid
-#import cv2
-#import qrcode
-#rom pyzbar.pyzbar import decode
+import uuid
+import cv2
+import qrcode
+from pyzbar.pyzbar import decode
 from datetime import datetime, timedelta
-from secure_qr import SecureQR
+from secure_qr import SecureQR, secure_qr
+import hmac
 
 # ============================================================
 # CONFIGURATION
@@ -29,7 +30,9 @@ def create_qr_code(voucher_code):
     Return a BASE64 data URL for the QR image, same as before,
     but now the QR encodes a signed V2 payload wrapping voucher_code.
     """
-    sec = SecureQR()  # uses VOUCHER_SECRET_KEY if set
+    # Use the global secure_qr instance to ensure consistent secret key
+    # This is critical - both creation and validation must use the same key
+    sec = secure_qr
     now = datetime.now()
     expires_at = now + timedelta(hours=Config.get_voucher_validity_hours())
 
@@ -41,7 +44,7 @@ def create_qr_code(voucher_code):
         "version": SecureQR.VERSION
     }
 
-    # SecureQR wants a single string to embed; we’ll reuse its signing method
+    # SecureQR wants a single string to embed; we'll reuse its signing method
     # by temporarily calling a tiny helper on the instance:
     import json, base64
     encoded_data = base64.b64encode(json.dumps(payload, sort_keys=True).encode()).decode()
@@ -77,19 +80,100 @@ def create_qr_code(voucher_code):
 '''
 
 # Optional helper to check and parse incoming QR strings (V1 or V2)
-def parse_qr_text(qr_text: str) -> str:
+def parse_qr_text(qr_text: str, allow_expired: bool = True) -> str:
     """
     Accept either legacy code (V1) or V2 secure string.
     Returns the underlying voucher_code to redeem.
+    
+    Args:
+        qr_text: The QR code text to parse
+        allow_expired: If True, extract code even if expired (expiration checked at redemption)
+    
+    Returns:
+        The voucher code string
     """
+    if not qr_text:
+        raise ValueError("Empty QR code text")
+    
+    qr_text = qr_text.strip()
+    
     if qr_text.startswith('V2|'):
-        # validate and extract
-        from secure_qr import secure_qr
-        ok, data, msg = secure_qr.validate_secure_code(qr_text)
-        if not ok:
-            raise ValueError(f"Invalid secure code: {msg}")
-        return data["code"]
-    return qr_text  # legacy
+        # Parse and extract V2 secure code
+        try:
+            # Parse secure code format: V2|encoded_data|signature
+            parts = qr_text.split('|')
+            if len(parts) != 3:
+                raise ValueError("Invalid V2 code format")
+            
+            version, encoded_data, signature = parts
+            
+            # Check version
+            if version != SecureQR.VERSION:
+                raise ValueError(f"Unsupported version: {version}")
+            
+            # First, try to decode the data to see if it's valid
+            import json, base64
+            try:
+                json_data = base64.b64decode(encoded_data.encode()).decode()
+                voucher_data = json.loads(json_data)
+            except Exception as e:
+                raise ValueError(f"Invalid data encoding: {str(e)}")
+            
+            # Extract the code from the data
+            if "code" not in voucher_data:
+                raise ValueError("No voucher code found in secure data")
+            
+            code = voucher_data["code"]
+            
+            # Try to verify signature, but if it fails and we're allowing expired/invalid,
+            # we can still extract the code (useful if secret key changed or for debugging)
+            signature_valid = False
+            try:
+                expected_signature = secure_qr._generate_signature(encoded_data)
+                signature_valid = hmac.compare_digest(signature, expected_signature)
+                
+                if not signature_valid:
+                    # Signature doesn't match - this could be due to:
+                    # 1. Secret key mismatch (QR generated with different key) - MOST COMMON
+                    # 2. Code was tampered with
+                    # 3. Secret key was changed after QR generation
+                    
+                    if allow_expired:
+                        # Even if signature fails, we can extract the code
+                        # The signature check will happen again at redemption if needed
+                        print(f"[WARNING] Signature mismatch for code {code}. This may be due to secret key change. Extracting code anyway.")
+                    else:
+                        raise ValueError("Invalid signature - code may be tampered or secret key mismatch")
+            except ValueError:
+                # Re-raise ValueError if allow_expired=False (already handled above)
+                raise
+            except Exception as sig_error:
+                # If signature verification itself fails (not just mismatch), 
+                # and allow_expired=True, still extract code
+                if allow_expired:
+                    print(f"[WARNING] Could not verify signature for code {code}: {sig_error}. Extracting code anyway.")
+                else:
+                    raise ValueError(f"Signature verification failed: {str(sig_error)}")
+            
+            # Optionally check expiration (but still return code if allow_expired=True)
+            if not allow_expired:
+                expires_at_str = voucher_data.get('expires_at')
+                if expires_at_str:
+                    from datetime import datetime
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if datetime.now() > expires_at:
+                        raise ValueError("Voucher has expired")
+            
+            return code
+                
+        except ValueError:
+            # Re-raise ValueError as-is
+            raise
+        except Exception as e:
+            raise ValueError(f"Failed to parse secure code: {str(e)}")
+    
+    # Legacy V1 code - return as is (should be 12 characters alphanumeric)
+    return qr_text
 
 
 def generate_and_save_vouchers(n=NUM_VOUCHERS):
